@@ -107,13 +107,13 @@ pebble build
 Install to emulator (headless-friendly):
 
 ```bash
-pebble install --emulator basalt --vnc
+pebble install --emulator emery --vnc
 ```
 
 Take a screenshot:
 
 ```bash
-pebble screenshot --emulator basalt --vnc --no-open screenshot.png
+pebble screenshot --emulator emery --vnc --no-open screenshot.png
 ```
 
 ---
