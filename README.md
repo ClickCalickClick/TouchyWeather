@@ -36,6 +36,80 @@ TouchyWeather is a carousel of focused weather cards:
 
 ---
 
+## Screenshots
+
+Each card is shown on both **emery** (rectangular) and **gabbro** (round). Swipe left/right to move between cards.
+
+<table>
+  <tr>
+    <th>emery</th>
+    <th>gabbro</th>
+    <th>Description</th>
+  </tr>
+  <tr>
+    <td><img src="screenshots/fresh/main_emery.png" width="144"></td>
+    <td><img src="screenshots/fresh/main_gabbro.png" width="144"></td>
+    <td><strong>Main</strong><br>At-a-glance current conditions: temperature, feels-like, high/low, wind speed &amp; direction, humidity, and a bottom banner showing the next precipitation event.</td>
+  </tr>
+  <tr>
+    <td><img src="screenshots/fresh/advice_emery.png" width="144"></td>
+    <td><img src="screenshots/fresh/advice_gabbro.png" width="144"></td>
+    <td><strong>Touch &amp; Go</strong><br>The personality engine. Classifies live conditions and delivers a witty or practical one-liner — "Active drizzle. Boots &gt; sneakers." It also echoes the next precipitation banner so you never lose context.</td>
+  </tr>
+  <tr>
+    <td><img src="screenshots/fresh/hours_emery.png" width="144"></td>
+    <td><img src="screenshots/fresh/hours_gabbro.png" width="144"></td>
+    <td><strong>6 Hours</strong><br>Hour-by-hour outlook for the next six hours: time, weather icon, temperature, and precipitation probability — useful for planning the next few hours of your day.</td>
+  </tr>
+  <tr>
+    <td><img src="screenshots/fresh/week_emery.png" width="144"></td>
+    <td><img src="screenshots/fresh/week_gabbro.png" width="144"></td>
+    <td><strong>Week Ahead</strong><br>Four-day forecast snapshot showing day name, condition icon, high/low temperatures, and rain probability for each day.</td>
+  </tr>
+  <tr>
+    <td><img src="screenshots/fresh/precip_emery.png" width="144"></td>
+    <td><img src="screenshots/fresh/precip_gabbro.png" width="144"></td>
+    <td><strong>Precipitation</strong><br>Bar chart of near-term rain probability across the next several hours (Now → +4h), giving a visual sense of how quickly rain is arriving or clearing.</td>
+  </tr>
+  <tr>
+    <td><img src="screenshots/fresh/uv_emery.png" width="144"></td>
+    <td><img src="screenshots/fresh/uv_gabbro.png" width="144"></td>
+    <td><strong>UV Index</strong><br>Gauge-style dial showing the current UV index value and risk label (Low / Moderate / High / etc.). Helps you decide whether sunscreen is optional or mandatory.</td>
+  </tr>
+  <tr>
+    <td><img src="screenshots/fresh/aq_emery.png" width="144"></td>
+    <td><img src="screenshots/fresh/aq_gabbro.png" width="144"></td>
+    <td><strong>Air Quality</strong><br>Gauge-style AQI reading with a descriptive label (Good / Moderate / Unhealthy / etc.). Useful for runners and anyone sensitive to air pollution.</td>
+  </tr>
+  <tr>
+    <td><img src="screenshots/fresh/sun_emery.png" width="144"></td>
+    <td><img src="screenshots/fresh/sun_gabbro.png" width="144"></td>
+    <td><strong>Sun Cycle</strong><br>Sunrise and sunset times for your location, displayed with distinct up/down icons so you can plan outdoor activities around available daylight.</td>
+  </tr>
+  <tr>
+    <td><img src="screenshots/fresh/night_emery.png" width="144"></td>
+    <td><img src="screenshots/fresh/night_gabbro.png" width="144"></td>
+    <td><strong>Night Sky</strong><br>Current moon phase name and illumination percentage, rendered with a large moon-phase illustration. Handy for stargazers or anyone curious about tonight's sky.</td>
+  </tr>
+  <tr>
+    <td><img src="screenshots/fresh/golden_emery.png" width="144"></td>
+    <td><img src="screenshots/fresh/golden_gabbro.png" width="144"></td>
+    <td><strong>Golden Hour</strong><br>Blue-hour and golden-hour start times for both morning and evening, colour-coded in blue and gold. Perfect for photographers chasing the best light.</td>
+  </tr>
+  <tr>
+    <td><img src="screenshots/fresh/radar_emery.png" width="144"></td>
+    <td><img src="screenshots/fresh/radar_gabbro.png" width="144"></td>
+    <td><strong>Radar</strong><br>Streamed precipitation radar image rendered directly on the watch, with a crosshair centred on your location and RainViewer attribution. Press <strong>SELECT</strong> to force a refresh.</td>
+  </tr>
+  <tr>
+    <td><img src="screenshots/fresh/settings_emery.png" width="144"></td>
+    <td><img src="screenshots/fresh/settings_gabbro.png" width="144"></td>
+    <td><strong>Settings — Manage Cards</strong><br>Toggle any card on or off to build your ideal weather deck. Main and Touch &amp; Go are always enabled; everything else is optional. Tap to move the cursor, SELECT to toggle.</td>
+  </tr>
+</table>
+
+---
+
 ## Radar: Highlight Feature
 
 The Radar card streams a watch-optimized image from the radar proxy and renders it directly on-watch, including:
