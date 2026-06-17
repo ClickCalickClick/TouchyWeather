@@ -49,6 +49,20 @@ def generate_version_header(ctx):
             from waflib import Logs
             Logs.warn('version_gen: no "## x.y.z" entry found in CHANGELOG.md')
 
+        # Guarantee versions only ever go up: the top entry must be strictly
+        # greater than the previous one. Fails the build otherwise so a
+        # non-increasing version can never be shipped.
+        vers = re.findall(r'(?m)^##\s+(\d+)\.(\d+)\.(\d+)', text)
+        if len(vers) >= 2:
+            top = tuple(int(x) for x in vers[0])
+            prev = tuple(int(x) for x in vers[1])
+            top_code = top[0] * 10000 + top[1] * 100 + top[2]
+            prev_code = prev[0] * 10000 + prev[1] * 100 + prev[2]
+            if top_code <= prev_code:
+                ctx.fatal('version_gen: CHANGELOG top version %d.%d.%d must be '
+                          'greater than the previous entry %d.%d.%d'
+                          % (top + prev))
+
     # Warn (non-fatal) if the store version drifts from the changelog top.
     pkg = ctx.path.find_node('package.json')
     if pkg:
