@@ -79,8 +79,8 @@ module.exports = [
         "type": "select",
         "messageKey": "BackgroundUpdateInterval",
         "label": "Auto-refresh interval",
-        "description": "Opt-in: Fetch weather in background even when app is closed. May impact battery life. Requires firmware 4.0+.",
-        "defaultValue": "0",
+        "description": "Fetch weather in the background even when the app is closed. May impact battery life. Requires firmware 4.0+.",
+        "defaultValue": "3600",
         "options": [
           { "label": "Disabled (manual refresh only)", "value": "0" },
           { "label": "Every hour (recommended)", "value": "3600" },
