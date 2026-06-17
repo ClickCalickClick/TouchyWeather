@@ -73,6 +73,27 @@ module.exports = [
     "items": [
       {
         "type": "heading",
+        "defaultValue": "Background Updates"
+      },
+      {
+        "type": "select",
+        "messageKey": "BackgroundUpdateInterval",
+        "label": "Auto-refresh interval",
+        "description": "Opt-in: Fetch weather in background even when app is closed. May impact battery life. Requires firmware 4.0+.",
+        "defaultValue": "0",
+        "options": [
+          { "label": "Disabled (manual refresh only)", "value": "0" },
+          { "label": "Every hour (recommended)", "value": "3600" },
+          { "label": "Every 30 minutes", "value": "1800" }
+        ]
+      }
+    ]
+  },
+  {
+    "type": "section",
+    "items": [
+      {
+        "type": "heading",
         "defaultValue": "Location"
       },
       {

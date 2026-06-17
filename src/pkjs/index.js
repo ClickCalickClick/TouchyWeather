@@ -662,10 +662,19 @@ Pebble.addEventListener('ready', function() {
 Pebble.addEventListener('appmessage', function(e) {
   var p = (e && e.payload) || {};
   if (p.RadarRequest) {
+    console.log('appmessage: RadarRequest');
     fetchRadar();
     return;
   }
-  locateAndFetch();
+  // Only fetch weather when explicitly requested via the LastUpdated sentinel.
+  // The C side sends LastUpdated=1 for manual refresh or background wakeup.
+  // Config messages (theme, toggles, etc.) should NOT trigger a fetch.
+  if (p.LastUpdated !== undefined) {
+    console.log('appmessage: LastUpdated sentinel, fetching weather');
+    locateAndFetch();
+  } else {
+    console.log('appmessage: config message, no fetch');
+  }
 });
 
 Pebble.addEventListener('showConfiguration', function() {

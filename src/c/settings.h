@@ -44,6 +44,11 @@ void settings_save_theme(int theme_mode);
 bool settings_get_loop_nav(void);
 void settings_set_loop_nav(bool loop);
 
+// Background update interval in seconds. 0 = disabled, 1800 = 30 mins, 3600 = 1 hour.
+// Default is 3600 (1 hour). Persisted across launches.
+int settings_get_background_interval(void);
+void settings_set_background_interval(int interval_secs);
+
 bool settings_get_enabled(ToggleId id);
 void settings_set_enabled(ToggleId id, bool enabled);
 

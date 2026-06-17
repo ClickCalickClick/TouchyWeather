@@ -9,6 +9,28 @@
 
 static CommUpdateCb s_update_cb = NULL;
 
+// Background update state
+static int s_bg_fail_count = 0;
+static const int s_max_backoff_mins = 240;  // 4 hours cap
+static AppTimer *s_bg_timeout_timer = NULL;
+static bool s_is_background_mode = false;
+static WakeupId s_wakeup_id = -1;
+static AppTimer *s_bg_exit_timer = NULL;
+// Off-screen keep-alive window for background (wakeup) launches. Pebble's
+// app_event_loop() returns the instant the window stack is empty, so a
+// headless fetch with no window pushed would exit before any async
+// AppMessage round-trip. We push this on background init and pop it once
+// the fetch finishes (or times out) so the loop stays alive in between.
+static Window *s_bg_window = NULL;
+
+// Persistent storage key for wakeup ID
+#define PERSIST_KEY_WAKEUP_ID 300
+
+// Forward declarations
+static void prv_reschedule_wakeup(bool success);
+static void prv_wakeup_handler(WakeupId id, int32_t reason);
+static void prv_bg_exit(void *data);
+
 // Bumped from 100 -> 101 when last_updated was added to WeatherData,
 // to avoid loading a stale-layout blob from older app versions.
 // Bumped 101 -> 102 when Phase 11 added blue_am/gold_am/gold_pm/blue_pm
@@ -98,6 +120,35 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
   }
   if ((t = dict_find(iter, MESSAGE_KEY_LoopNavigation))) {
     settings_set_loop_nav(t->value->int32 != 0);
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_BackgroundUpdateInterval))) {
+    int old_interval = settings_get_background_interval();
+    // Clay's `select` control delivers its string option values
+    // ("0"/"1800"/"3600") as TUPLE_CSTRING, just like the Theme
+    // radiogroup above. Reading ->int32 here would interpret the raw
+    // ASCII bytes ("1800" -> 0x30303831 ~= 808M) and schedule a wakeup
+    // ~25 years out, silently killing background updates. Accept both
+    // encodings (direct AppMessage tests still send TUPLE_INT).
+    int new_interval;
+    if (t->type == TUPLE_CSTRING) {
+      new_interval = atoi(t->value->cstring);
+    } else {
+      new_interval = (int)t->value->int32;
+    }
+    settings_set_background_interval(new_interval);
+    
+    // If interval changed, reschedule or cancel wakeups
+    if (new_interval != old_interval) {
+      if (new_interval == 0) {
+        // Disabled - cancel all wakeups
+        wakeup_cancel_all();
+        APP_LOG(APP_LOG_LEVEL_INFO, "BG: Disabled, cancelled wakeups");
+      } else {
+        // Enabled or interval changed - reschedule
+        prv_reschedule_wakeup(true);
+        APP_LOG(APP_LOG_LEVEL_INFO, "BG: Interval changed to %d secs", new_interval);
+      }
+    }
   }
   if ((t = dict_find(iter, MESSAGE_KEY_PollenLevel))) {
     d->pollen_level = (int)t->value->int32;
@@ -272,11 +323,39 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
     // Notify the pull-to-refresh sheet so it can close. Safe in any
     // state — it's a no-op unless the sheet is currently loading.
     refresh_sheet_on_data_received();
+
+    // If we're in background mode, cancel timeout and reschedule next wakeup
+    if (s_is_background_mode) {
+      if (s_bg_timeout_timer) {
+        app_timer_cancel(s_bg_timeout_timer);
+        s_bg_timeout_timer = NULL;
+      }
+      APP_LOG(APP_LOG_LEVEL_INFO, "BG: Data received successfully");
+      prv_reschedule_wakeup(true);  // Success - normal interval
+      s_is_background_mode = false;
+
+      // Schedule delayed exit to allow cleanup to complete
+      s_bg_exit_timer = app_timer_register(100, prv_bg_exit, NULL);
+    }
   }
 }
 
 static void prv_inbox_dropped(AppMessageResult reason, void *context) {
   APP_LOG(APP_LOG_LEVEL_WARNING, "AppMessage dropped: %d", (int)reason);
+
+  // If we're in background mode, this is a failure - reschedule with backoff
+  if (s_is_background_mode) {
+    if (s_bg_timeout_timer) {
+      app_timer_cancel(s_bg_timeout_timer);
+      s_bg_timeout_timer = NULL;
+    }
+    APP_LOG(APP_LOG_LEVEL_ERROR, "BG: Message dropped, rescheduling with backoff");
+    prv_reschedule_wakeup(false);  // Failure - exponential backoff
+    s_is_background_mode = false;
+
+    // Schedule delayed exit to allow cleanup to complete
+    s_bg_exit_timer = app_timer_register(100, prv_bg_exit, NULL);
+  }
 }
 
 void comm_request_refresh(void) {
@@ -302,6 +381,29 @@ void comm_set_update_callback(CommUpdateCb cb) {
 
 static void prv_initial_refresh(void *ctx) {
   (void)ctx;
+  
+  WeatherData *d = weather_data_get();
+  
+  // If no cached data exists, always fetch
+  if (!d->valid || d->last_updated == 0) {
+    APP_LOG(APP_LOG_LEVEL_INFO, "No cached data, fetching on open");
+    comm_request_refresh();
+    return;
+  }
+  
+  // Check age of cached data
+  uint32_t now = (uint32_t)time(NULL);
+  uint32_t age_secs = now - d->last_updated;
+  uint32_t threshold_secs = 15 * 60;  // 15 minutes
+  
+  if (age_secs < threshold_secs) {
+    APP_LOG(APP_LOG_LEVEL_INFO, "Data is %lu secs old (<%lu threshold), skipping fetch", 
+            (unsigned long)age_secs, (unsigned long)threshold_secs);
+    return;
+  }
+  
+  APP_LOG(APP_LOG_LEVEL_INFO, "Data is %lu secs old (>%lu threshold), fetching on open", 
+          (unsigned long)age_secs, (unsigned long)threshold_secs);
   comm_request_refresh();
 }
 
@@ -312,6 +414,138 @@ void comm_load_cache(void) {
   if (s_update_cb && weather_data_get()->valid) {
     s_update_cb();
   }
+}
+
+// Reschedule wakeup with exponential backoff on failure
+static void prv_reschedule_wakeup(bool success) {
+  int interval = settings_get_background_interval();
+  if (interval == 0) return;  // Disabled
+
+  int delay_secs;
+  if (success) {
+    s_bg_fail_count = 0;
+    delay_secs = interval;  // Normal interval (30 or 60 mins)
+  } else {
+    s_bg_fail_count++;
+    // Exponential: 5, 10, 20, 40, 80, 160 mins (cap at 4 hrs)
+    int backoff_mins = 5 * (1 << (s_bg_fail_count - 1));
+    if (backoff_mins > s_max_backoff_mins) {
+      backoff_mins = s_max_backoff_mins;
+    }
+    delay_secs = backoff_mins * 60;
+  }
+
+  time_t next_wakeup = time(NULL) + delay_secs;
+  
+  // Cancel existing wakeup
+  if (s_wakeup_id >= 0) {
+    wakeup_cancel(s_wakeup_id);
+    s_wakeup_id = -1;
+  }
+  wakeup_cancel_all();  // Extra safety - cancel any orphaned wakeups
+  
+  // Retry wakeup scheduling with incremental 1-minute offsets to handle
+  // slot conflicts. Pattern from pebble/goodthink - try up to 15 times.
+  WakeupId wid = -1;
+  uint8_t try = 0;
+  while (wid < 0 && try < 15) {
+    wid = wakeup_schedule(next_wakeup + (SECONDS_PER_MINUTE * try), 0, true);
+    try++;
+  }
+  
+  if (wid >= 0) {
+    s_wakeup_id = wid;
+    persist_write_int(PERSIST_KEY_WAKEUP_ID, wid);
+    APP_LOG(APP_LOG_LEVEL_INFO, "BG: Wakeup scheduled in %d seconds (wid=%d, attempts=%d)", 
+            delay_secs, (int)wid, try);
+  } else {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "BG: Wakeup scheduling FAILED after %d attempts", try);
+    persist_delete(PERSIST_KEY_WAKEUP_ID);
+  }
+}
+
+// Wakeup handler - called when wakeup fires while app is running
+static void prv_wakeup_handler(WakeupId id, int32_t reason) {
+  (void)reason;
+  APP_LOG(APP_LOG_LEVEL_INFO, "BG: Wakeup fired while app running (wid=%d)", (int)id);
+  
+  // Clean up persisted ID
+  if (persist_exists(PERSIST_KEY_WAKEUP_ID)) {
+    persist_delete(PERSIST_KEY_WAKEUP_ID);
+  }
+  s_wakeup_id = -1;
+  
+  // Trigger a fetch
+  comm_request_refresh();
+  
+  // Schedule next wakeup
+  prv_reschedule_wakeup(true);
+}
+
+// Delayed exit callback - closes AppMessage and allows app to terminate
+static void prv_bg_exit(void *data) {
+  (void)data;
+  APP_LOG(APP_LOG_LEVEL_INFO, "BG: Closing AppMessage and exiting");
+  app_message_deregister_callbacks();
+  s_bg_exit_timer = NULL;
+  // Pop (and free) the keep-alive window so the window stack empties and
+  // app_event_loop() returns, letting the app terminate cleanly.
+  if (s_bg_window) {
+    window_stack_remove(s_bg_window, false);
+    window_destroy(s_bg_window);
+    s_bg_window = NULL;
+  }
+}
+
+// Background timeout - no data arrived within 28 seconds
+static void prv_bg_timeout(void *data) {
+  (void)data;
+  APP_LOG(APP_LOG_LEVEL_WARNING, "BG: Timeout - no data received");
+  prv_reschedule_wakeup(false);  // Failure - exponential backoff
+  s_bg_timeout_timer = NULL;
+  s_is_background_mode = false;
+
+  // Schedule delayed exit to allow cleanup to complete
+  s_bg_exit_timer = app_timer_register(100, prv_bg_exit, NULL);
+}
+
+// Background mode initialization - minimal init, no UI
+void comm_background_init(void) {
+  int interval = settings_get_background_interval();
+  if (interval == 0) {
+    APP_LOG(APP_LOG_LEVEL_INFO, "BG: Disabled, skipping");
+    return;
+  }
+
+  // Clean up the persisted wakeup ID that triggered this launch
+  if (persist_exists(PERSIST_KEY_WAKEUP_ID)) {
+    WakeupId triggered_id = persist_read_int(PERSIST_KEY_WAKEUP_ID);
+    APP_LOG(APP_LOG_LEVEL_INFO, "BG: Cleaning up triggered wakeup (wid=%d)", (int)triggered_id);
+    persist_delete(PERSIST_KEY_WAKEUP_ID);
+  }
+  s_wakeup_id = -1;
+
+  APP_LOG(APP_LOG_LEVEL_INFO, "BG: Starting background fetch");
+  s_is_background_mode = true;
+
+  // Keep the event loop alive: without a window on the stack,
+  // app_event_loop() returns immediately and the OS tears us down before
+  // any data arrives. This window is never drawn to (no handlers); it
+  // exists purely to hold the loop open until prv_bg_exit pops it.
+  s_bg_window = window_create();
+  window_stack_push(s_bg_window, false);
+
+  // Open AppMessage (triggers PKJS ready event)
+  app_message_register_inbox_received(prv_inbox_received);
+  app_message_register_inbox_dropped(prv_inbox_dropped);
+  app_message_open(2048, 256);
+
+  // Request weather
+  comm_request_refresh();
+
+  // Set 28-second timeout (OS kills us at ~30 seconds).
+  // Increased from 25s to allow more time for geolocation + API fetch.
+  s_bg_timeout_timer = app_timer_register(28000, prv_bg_timeout, NULL);
 }
 
 void comm_init(void) {
@@ -325,8 +559,42 @@ void comm_init(void) {
   // background-relaunch / cached-PKJS scenarios it doesn't. Send our own
   // request after a short delay so AppMessage is fully open first.
   app_timer_register(750, prv_initial_refresh, NULL);
+  
+  int bg_interval = settings_get_background_interval();
+  if (bg_interval > 0) {
+    // Subscribe to wakeup events while app is running (backgrounded or foreground)
+    wakeup_service_subscribe(prv_wakeup_handler);
+    
+    // Check if we have a persisted wakeup from previous launch
+    bool wakeup_valid = false;
+    if (persist_exists(PERSIST_KEY_WAKEUP_ID)) {
+      s_wakeup_id = persist_read_int(PERSIST_KEY_WAKEUP_ID);
+      
+      // Verify it's still scheduled (not expired/cancelled)
+      time_t wakeup_time = 0;
+      if (wakeup_query(s_wakeup_id, &wakeup_time)) {
+        wakeup_valid = true;
+        time_t now = time(NULL);
+        int secs_until = (int)(wakeup_time - now);
+        APP_LOG(APP_LOG_LEVEL_INFO, "BG: Existing wakeup found (wid=%d, in %d secs)", 
+                (int)s_wakeup_id, secs_until);
+      } else {
+        APP_LOG(APP_LOG_LEVEL_INFO, "BG: Persisted wakeup invalid, cleaning up");
+        persist_delete(PERSIST_KEY_WAKEUP_ID);
+        s_wakeup_id = -1;
+      }
+    }
+    
+    // Schedule new wakeup if none exists
+    if (!wakeup_valid) {
+      prv_reschedule_wakeup(true);
+      APP_LOG(APP_LOG_LEVEL_INFO, "BG: Scheduling initial wakeup (%d secs)", bg_interval);
+    }
+  }
 }
 
 void comm_deinit(void) {
   app_message_deregister_callbacks();
+  // Note: wakeup_service_unsubscribe() doesn't exist in Pebble SDK
+  // Subscription is automatically cleaned up when app closes
 }

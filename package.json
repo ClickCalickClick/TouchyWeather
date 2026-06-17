@@ -137,7 +137,8 @@
       "UseDewPoint",
       "DewPoint",
       "PollenLevel",
-      "LoopNavigation"
+      "LoopNavigation",
+      "BackgroundUpdateInterval"
     ],
     "resources": {
     "media": [

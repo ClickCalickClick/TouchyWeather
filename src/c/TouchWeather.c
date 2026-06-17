@@ -275,6 +275,30 @@ static void prv_deinit(void) {
 }
 
 int main(void) {
+  // Check if this is a background wakeup
+  if (launch_reason() == APP_LAUNCH_WAKEUP) {
+    // Background fetch mode - no UI, just fetch and exit
+    APP_LOG(APP_LOG_LEVEL_INFO, "Launched from wakeup");
+
+    // Initialize weather data structure (required for cache writes)
+    weather_data_init_mock();
+
+    // Load settings to check interval
+    settings_load();
+
+    // Init background fetch (minimal init, no UI)
+    comm_background_init();
+
+    // CRITICAL: Must run event loop for AppMessage callbacks to fire.
+    // The OS will kill us after ~30 seconds, or we'll exit when data
+    // arrives or timeout fires (both call app_event_loop_exit()).
+    app_event_loop();
+
+    APP_LOG(APP_LOG_LEVEL_INFO, "BG: Event loop exited");
+    return 0;
+  }
+
+  // Normal launch - full UI mode
   prv_init();
   app_event_loop();
   prv_deinit();
