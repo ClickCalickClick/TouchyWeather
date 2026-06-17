@@ -1,6 +1,9 @@
 # Build artifacts — regenerate with `pebble build`
 build/
 
+# Generated from CHANGELOG.md by the wscript build hook
+src/c/version_gen.h
+
 # JS dependencies — regenerate with `npm install`
 node_modules/
 

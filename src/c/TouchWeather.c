@@ -7,6 +7,7 @@
 #include "anim.h"
 #include "settings.h"
 #include "refresh_sheet.h"
+#include "update_notes.h"
 #include "cards/cards.h"
 
 // Card-registry indices for the toggleable cards. Must match the
@@ -264,6 +265,9 @@ static void prv_init(void) {
   });
   window_stack_push(s_window, true);
 
+  // One-time "What's New" modal on top of the main window after an update.
+  update_notes_maybe_show();
+
   comm_init();
   anim_init();
 }
@@ -271,6 +275,7 @@ static void prv_init(void) {
 static void prv_deinit(void) {
   anim_deinit();
   comm_deinit();
+  update_notes_deinit();
   window_destroy(s_window);
 }
 
