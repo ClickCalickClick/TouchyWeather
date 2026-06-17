@@ -191,3 +191,40 @@ void update_notes_maybe_show(void) {
 void update_notes_deinit(void) {
   if (s_win) { window_destroy(s_win); s_win = NULL; }
 }
+
+// --- Touch-drag scrolling -------------------------------------------------
+// The screen is "showing" exactly while its layers are loaded (s_scroll is
+// created in .load and cleared in .unload), so these no-op once dismissed.
+
+static int16_t s_drag_start_y;
+static int s_drag_start_off;
+
+static bool prv_showing(void) { return s_scroll != NULL; }
+
+bool update_notes_on_touchdown(int16_t x, int16_t y) {
+  (void)x;
+  if (!prv_showing()) return false;
+  s_drag_start_y = y;
+  s_drag_start_off = scroll_layer_get_content_offset(s_scroll).y;
+  return true;
+}
+
+bool update_notes_on_move(int16_t x, int16_t y) {
+  (void)x;
+  if (!prv_showing()) return false;
+  // Content follows the finger: drag up → scroll down (offset more negative).
+  int off = s_drag_start_off + (y - s_drag_start_y);
+  GSize content = scroll_layer_get_content_size(s_scroll);
+  int frame_h = layer_get_frame(scroll_layer_get_layer(s_scroll)).size.h;
+  int min_off = frame_h - content.h;   // most-negative (bottom); 0 if it fits
+  if (min_off > 0) min_off = 0;
+  if (off > 0) off = 0;
+  if (off < min_off) off = min_off;
+  scroll_layer_set_content_offset(s_scroll, GPoint(0, off), false);
+  return true;
+}
+
+bool update_notes_on_liftoff(int16_t x, int16_t y) {
+  (void)x; (void)y;
+  return prv_showing();  // swallow liftoff so it isn't treated as a tap/swipe
+}

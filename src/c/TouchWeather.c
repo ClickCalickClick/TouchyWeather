@@ -72,6 +72,9 @@ static void touch_handler(const TouchEvent *event, void *context) {
       s_tracking = true;
       s_start_x = event->x;
       s_start_y = event->y;
+      // The What's New modal sits on top, so it gets first crack: a drag
+      // there scrolls the notes and consumes the gesture.
+      if (update_notes_on_touchdown(event->x, event->y)) break;
       // Give the refresh sheet first crack at the gesture. If it claims
       // it (e.g. sheet is already open), we still record start coords
       // for completeness but later events get routed to the sheet first.
@@ -79,6 +82,7 @@ static void touch_handler(const TouchEvent *event, void *context) {
       break;
     case TouchEvent_PositionUpdate:
       if (!s_tracking) break;
+      if (update_notes_on_move(event->x, event->y)) break;
       // Refresh sheet handles pull-down tracking. If it consumes the
       // event we stop here; otherwise nothing else needs to react to
       // mid-gesture moves today.
@@ -86,6 +90,10 @@ static void touch_handler(const TouchEvent *event, void *context) {
       break;
     case TouchEvent_Liftoff: {
       if (!s_tracking) break;
+      if (update_notes_on_liftoff(event->x, event->y)) {
+        s_tracking = false;
+        break;
+      }
       // Sheet first — if it consumes the liftoff (committed pull or
       // tracking-cancel), skip the swipe/tap fallthrough entirely.
       if (refresh_sheet_on_liftoff(event->x, event->y)) {
