@@ -7,6 +7,7 @@
 #include "anim.h"
 #include "settings.h"
 #include "refresh_sheet.h"
+#include "update_notes.h"
 #include "cards/cards.h"
 
 // Card-registry indices for the toggleable cards. Must match the
@@ -71,6 +72,9 @@ static void touch_handler(const TouchEvent *event, void *context) {
       s_tracking = true;
       s_start_x = event->x;
       s_start_y = event->y;
+      // The What's New modal sits on top, so it gets first crack: a drag
+      // there scrolls the notes and consumes the gesture.
+      if (update_notes_on_touchdown(event->x, event->y)) break;
       // Give the refresh sheet first crack at the gesture. If it claims
       // it (e.g. sheet is already open), we still record start coords
       // for completeness but later events get routed to the sheet first.
@@ -78,6 +82,7 @@ static void touch_handler(const TouchEvent *event, void *context) {
       break;
     case TouchEvent_PositionUpdate:
       if (!s_tracking) break;
+      if (update_notes_on_move(event->x, event->y)) break;
       // Refresh sheet handles pull-down tracking. If it consumes the
       // event we stop here; otherwise nothing else needs to react to
       // mid-gesture moves today.
@@ -85,6 +90,10 @@ static void touch_handler(const TouchEvent *event, void *context) {
       break;
     case TouchEvent_Liftoff: {
       if (!s_tracking) break;
+      if (update_notes_on_liftoff(event->x, event->y)) {
+        s_tracking = false;
+        break;
+      }
       // Sheet first — if it consumes the liftoff (committed pull or
       // tracking-cancel), skip the swipe/tap fallthrough entirely.
       if (refresh_sheet_on_liftoff(event->x, event->y)) {
@@ -264,6 +273,9 @@ static void prv_init(void) {
   });
   window_stack_push(s_window, true);
 
+  // One-time "What's New" modal on top of the main window after an update.
+  update_notes_maybe_show();
+
   comm_init();
   anim_init();
 }
@@ -271,10 +283,35 @@ static void prv_init(void) {
 static void prv_deinit(void) {
   anim_deinit();
   comm_deinit();
+  update_notes_deinit();
   window_destroy(s_window);
 }
 
 int main(void) {
+  // Check if this is a background wakeup
+  if (launch_reason() == APP_LAUNCH_WAKEUP) {
+    // Background fetch mode - no UI, just fetch and exit
+    APP_LOG(APP_LOG_LEVEL_INFO, "Launched from wakeup");
+
+    // Initialize weather data structure (required for cache writes)
+    weather_data_init_mock();
+
+    // Load settings to check interval
+    settings_load();
+
+    // Init background fetch (minimal init, no UI)
+    comm_background_init();
+
+    // CRITICAL: Must run event loop for AppMessage callbacks to fire.
+    // The OS will kill us after ~30 seconds, or we'll exit when data
+    // arrives or timeout fires (both call app_event_loop_exit()).
+    app_event_loop();
+
+    APP_LOG(APP_LOG_LEVEL_INFO, "BG: Event loop exited");
+    return 0;
+  }
+
+  // Normal launch - full UI mode
   prv_init();
   app_event_loop();
   prv_deinit();
