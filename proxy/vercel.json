@@ -8,6 +8,14 @@
     "api/pollen.js": {
       "memory": 256,
       "maxDuration": 10
+    },
+    "api/track.js": {
+      "memory": 256,
+      "maxDuration": 10
+    },
+    "api/stats.js": {
+      "memory": 256,
+      "maxDuration": 10
     }
   }
 }
