@@ -2,13 +2,18 @@
 #include "theme.h"
 
 // Persistence keys. Avoid collisions with comm.c PERSIST_KEY_CACHE=101.
-#define KEY_THEME            200
-#define KEY_LOOP_NAV         201  // bool: wrap card carousel at edges
-#define KEY_TOGGLE_BASE      210  // KEY_TOGGLE_BASE + ToggleId
-#define KEY_CARD_ORDER       220  // SETTINGS_TOGGLEABLE_COUNT bytes
+#define KEY_THEME              200
+#define KEY_LOOP_NAV           201  // bool: wrap card carousel at edges
+#define KEY_BG_UPDATE_INTERVAL 202  // int: background update interval in seconds
+#define KEY_TOGGLE_BASE        210  // KEY_TOGGLE_BASE + ToggleId
+#define KEY_CARD_ORDER         220  // SETTINGS_TOGGLEABLE_COUNT bytes
 
 // Default: loop the carousel (wrap at the first/last card).
 static bool s_loop_nav = true;
+
+// Background update interval in seconds. Default is 0 (disabled, opt-in).
+// 0 = disabled, 1800 = 30 mins, 3600 = 1 hour (recommended when enabled).
+static int s_bg_update_interval = 0;
 
 // Default visual order of rows in the Settings card. Decoupled from
 // the enum order so Touch & Go appears second (after the locked MAIN
@@ -92,6 +97,20 @@ void settings_load(void) {
   if (persist_exists(KEY_LOOP_NAV)) {
     s_loop_nav = persist_read_bool(KEY_LOOP_NAV);
   }
+  if (persist_exists(KEY_BG_UPDATE_INTERVAL)) {
+    int iv = persist_read_int(KEY_BG_UPDATE_INTERVAL);
+    // Sanity-guard the persisted interval. A prior build misparsed the
+    // Clay string value and could persist garbage (e.g. ~808M from the
+    // ASCII of "1800"), which scheduled a wakeup decades out. Accept only
+    // 0 (disabled) or a sane range; otherwise fall back to disabled so
+    // the corrupted value self-heals on the next launch.
+    if (iv == 0 || (iv >= 300 && iv <= 86400)) {
+      s_bg_update_interval = iv;
+    } else {
+      s_bg_update_interval = 0;
+      persist_write_int(KEY_BG_UPDATE_INTERVAL, 0);
+    }
+  }
 }
 
 void settings_save_theme(int theme_mode) {
@@ -105,6 +124,15 @@ bool settings_get_loop_nav(void) {
 void settings_set_loop_nav(bool loop) {
   s_loop_nav = loop;
   persist_write_bool(KEY_LOOP_NAV, loop);
+}
+
+int settings_get_background_interval(void) {
+  return s_bg_update_interval;
+}
+
+void settings_set_background_interval(int interval_secs) {
+  s_bg_update_interval = interval_secs;
+  persist_write_int(KEY_BG_UPDATE_INTERVAL, interval_secs);
 }
 
 bool settings_get_enabled(ToggleId id) {

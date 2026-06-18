@@ -1,6 +1,9 @@
 # Build artifacts — regenerate with `pebble build`
 build/
 
+# Generated from CHANGELOG.md by the wscript build hook
+src/c/version_gen.h
+
 # JS dependencies — regenerate with `npm install`
 node_modules/
 
@@ -33,3 +36,18 @@ screenshots/hint_v2_1.png
 screenshots/hint_v2_2.png
 screenshots/hint_v2_3.png
 screenshots/hint_v2_4.png
+/plans
+
+# Local scratch analysis / planning notes (kept on disk, not tracked)
+BACKGROUND_UPDATES_IMPLEMENTATION.md
+BACKGROUND_BUGS_IDENTIFIED.md
+BACKGROUND_UPDATES_ANALYSIS.md
+BACKGROUND_UPDATES_FIXES_APPLIED.md
+BACKGROUND_UPDATES_GAP_ANALYSIS.md
+BACKGROUND_UPDATES_NOT_FIRING_BUG.md
+BACKGROUND_UPDATES_OPT_IN_CHANGE.md
+COMPREHENSIVE_CODE_REVIEW.md
+FIXES_SUMMARY.md
+STALE_DATA_ISSUE_ANALYSIS.md
+TESTING_BACKGROUND_UPDATES.md
+TEST_RESULTS_VALIDATION.md

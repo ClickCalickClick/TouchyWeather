@@ -263,6 +263,7 @@ function xhr(url, cb) {
 function fetchWeather(lat, lon) {
   lastLat = lat;
   lastLon = lon;
+  trackPing(lat, lon); // anonymous once-per-day active-user ping (fire-and-forget)
   var units = getUnits();
   var tempUnit = units === 'metric' ? 'celsius' : 'fahrenheit';
   var windUnit = units === 'metric' ? 'kmh' : 'mph';
@@ -500,6 +501,11 @@ var RADAR_PROXY_URL = 'https://touchyweather-radar-proxy.vercel.app/api/radar?ke
 // as the radar endpoint, so the URL differs only in the /api path.
 var POLLEN_PROXY_URL = 'https://touchyweather-radar-proxy.vercel.app/api/pollen?key=tw-radar-prod-Xk7nQ2v9LpR4Mj8a';
 
+// Anonymous analytics ping. Same Vercel project + RADAR_SECRET auth key as
+// radar/pollen. The server hashes the id and stores only aggregate counts —
+// nothing identifiable leaves the device. See proxy/api/track.js.
+var TRACK_PROXY_URL = 'https://touchyweather-radar-proxy.vercel.app/api/track?key=tw-radar-prod-Xk7nQ2v9LpR4Mj8a';
+
 // Pollen is throttled to one proxy fetch per 6 hours per device.
 // Between fetches the last known level is re-sent from localStorage so
 // the watch always receives an up-to-date (or recently cached) value
@@ -542,6 +548,76 @@ function fetchPollen(lat, lon) {
       function(e) { console.log('pollen send fail: ' + JSON.stringify(e)); }
     );
   });
+}
+
+// ----------------------------------------------------------------------
+// Anonymous active-user analytics.
+//
+// Identifies the user by Pebble's account token — a stable, per-user,
+// per-app value containing no name/email/PII. When that's unavailable
+// (user not signed in) we fall back to a random id persisted locally.
+// The raw id is sent over HTTPS and hashed server-side; only aggregate
+// DAU/WAU/MAU/YAU counts + a coarse (~11 km) location cell are stored.
+// Throttled to one ping per UTC day so "daily active" is the natural unit.
+// Fire-and-forget: failures never affect weather/radar/pollen.
+// ----------------------------------------------------------------------
+
+function utcDayStr() {
+  var d = new Date();
+  function p(n) { return n < 10 ? '0' + n : '' + n; }
+  return d.getUTCFullYear() + '-' + p(d.getUTCMonth() + 1) + '-' + p(d.getUTCDate());
+}
+
+function getAnalyticsId() {
+  // Prefer the anonymous Pebble account token (consistent across the same
+  // user's watches). It can be '' when the user isn't signed in.
+  var token = '';
+  try { token = Pebble.getAccountToken() || ''; } catch (e) { token = ''; }
+  if (token) return token;
+
+  // Fallback: a locally persisted random id so an unsigned-in user still
+  // counts as one stable device rather than a new user every launch.
+  var anon = localStorage.getItem('anonId');
+  if (!anon) {
+    anon = 'anon-';
+    for (var i = 0; i < 32; i++) {
+      anon += Math.floor(Math.random() * 16).toString(16);
+    }
+    localStorage.setItem('anonId', anon);
+  }
+  return anon;
+}
+
+function trackPing(lat, lon) {
+  var today = utcDayStr();
+  if (localStorage.getItem('lastPingDay') === today) return; // already counted today
+
+  var id = getAnalyticsId();
+  // Round coords to 0.1° (~11 km) before they leave the device — analytics
+  // never needs precise location, only a coarse heatmap cell.
+  var rLat = Math.round(lat * 10) / 10;
+  var rLon = Math.round(lon * 10) / 10;
+
+  try {
+    var req = new XMLHttpRequest();
+    req.open('POST', TRACK_PROXY_URL, true);
+    req.timeout = 15000;
+    req.setRequestHeader('Content-Type', 'application/json');
+    req.onload = function() {
+      if (req.status >= 200 && req.status < 300) {
+        // Mark the day done only on success so a failed ping retries next refresh.
+        localStorage.setItem('lastPingDay', today);
+        console.log('track sent');
+      } else {
+        console.log('track http ' + req.status);
+      }
+    };
+    req.onerror = function() { console.log('track err'); };
+    req.ontimeout = function() { console.log('track timeout'); };
+    req.send(JSON.stringify({ id: id, lat: rLat, lon: rLon }));
+  } catch (e) {
+    console.log('track exception: ' + e.message);
+  }
 }
 
 // Hand-rolled base64 decoder for PKJS runtimes lacking `atob`.
@@ -683,6 +759,7 @@ Pebble.addEventListener('ready', function() {
 Pebble.addEventListener('appmessage', function(e) {
   var p = (e && e.payload) || {};
   if (p.RadarRequest) {
+    console.log('appmessage: RadarRequest');
     fetchRadar();
     return;
   }
@@ -691,7 +768,15 @@ Pebble.addEventListener('appmessage', function(e) {
   if (p.ClockIs24h !== undefined) {
     localStorage.setItem('clockIs24h', p.ClockIs24h ? '1' : '0');
   }
-  locateAndFetch();
+  // Only fetch weather when explicitly requested via the LastUpdated sentinel.
+  // The C side sends LastUpdated=1 for manual refresh or background wakeup.
+  // Config messages (theme, toggles, etc.) should NOT trigger a fetch.
+  if (p.LastUpdated !== undefined) {
+    console.log('appmessage: LastUpdated sentinel, fetching weather');
+    locateAndFetch();
+  } else {
+    console.log('appmessage: config message, no fetch');
+  }
 });
 
 Pebble.addEventListener('showConfiguration', function() {

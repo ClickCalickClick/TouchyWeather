@@ -5,6 +5,10 @@
 void comm_init(void);
 void comm_deinit(void);
 
+// Background mode: minimal init for wakeup-triggered fetches.
+// Called when app launches with APP_LAUNCH_WAKEUP.
+void comm_background_init(void);
+
 // Load cached weather data before first draw (prevents units flash).
 void comm_load_cache(void);
 
