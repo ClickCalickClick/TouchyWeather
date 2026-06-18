@@ -4,6 +4,9 @@ All notable changes to TouchyWeather. The top entry is the newest release; the
 build reads it to generate the in-app "What's New" screen, so keep the most
 recent version at the top with `## x.y.z` and one bullet (`- `) per line.
 
+## 1.10.0
+- Choose your clock format — 12-hour, 24-hour, or match your watch — in Settings.
+
 ## 1.9.1
 - last minute bug fixes
 
