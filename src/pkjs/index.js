@@ -28,12 +28,25 @@ function degToCompass(deg) {
   return dirs[Math.round(deg / 45) % 8];
 }
 
+// Resolve the active time format. "12"/"24" are explicit overrides; "0"
+// (default, "Match watch") follows the watch's system clock style, which the
+// C side reports via the ClockIs24h AppMessage on each refresh request.
+function use24h() {
+  var tf = localStorage.getItem('timeFormat') || '0';
+  if (tf === '1') return false;            // 12-hour
+  if (tf === '2') return true;             // 24-hour
+  return localStorage.getItem('clockIs24h') === '1';  // match watch
+}
+
 function fmtTime12(iso) {
   if (!iso) return '';
   var t = iso.split('T')[1] || '';
   var parts = t.split(':');
   var h = parseInt(parts[0], 10);
   var m = parts[1] || '00';
+  if (use24h()) {
+    return (h < 10 ? '0' + h : h) + ':' + m;
+  }
   var ampm = h >= 12 ? 'PM' : 'AM';
   h = h % 12; if (h === 0) h = 12;
   return h + ':' + m + ' ' + ampm;
@@ -207,9 +220,13 @@ function computeGoldenHour(date, lat, lng, utcOffsetSec) {
     var shifted = new Date(d.getTime() + (utcOffsetSec || 0) * 1000);
     var h = shifted.getUTCHours();
     var m = shifted.getUTCMinutes();
+    var mm = m < 10 ? '0' + m : m;
+    if (use24h()) {
+      return (h < 10 ? '0' + h : h) + ':' + mm;
+    }
     var ampm = h >= 12 ? 'PM' : 'AM';
     h = h % 12; if (h === 0) h = 12;
-    return h + ':' + (m < 10 ? '0' + m : m) + ' ' + ampm;
+    return h + ':' + mm + ' ' + ampm;
   }
 
   return {
@@ -357,9 +374,13 @@ function fetchWeather(lat, lon) {
           var hourLabel = '';
           if (times[idx]) {
             var hh = parseInt(times[idx].split('T')[1].split(':')[0], 10);
-            var ampm = hh >= 12 ? 'PM' : 'AM';
-            hh = hh % 12; if (hh === 0) hh = 12;
-            hourLabel = hh + ' ' + ampm;
+            if (use24h()) {
+              hourLabel = String(hh);
+            } else {
+              var ampm = hh >= 12 ? 'PM' : 'AM';
+              hh = hh % 12; if (hh === 0) hh = 12;
+              hourLabel = hh + ' ' + ampm;
+            }
           }
           msg['Hour' + hi + 'Label'] = hourLabel;
           msg['Hour' + hi + 'Temp']  = Math.round(temps[idx] || 0);
@@ -665,6 +686,11 @@ Pebble.addEventListener('appmessage', function(e) {
     fetchRadar();
     return;
   }
+  // The watch reports its system clock style with each refresh request so the
+  // "Match watch" time format can follow it.
+  if (p.ClockIs24h !== undefined) {
+    localStorage.setItem('clockIs24h', p.ClockIs24h ? '1' : '0');
+  }
   locateAndFetch();
 });
 
@@ -685,6 +711,11 @@ Pebble.addEventListener('webviewclosed', function(e) {
   if (dict.UseDewPoint !== undefined) {
     localStorage.setItem('useDewPoint',
       dict.UseDewPoint.value ? '1' : '0');
+  }
+  if (dict.TimeFormat !== undefined) {
+    // "0" match watch, "1" 12-hour, "2" 24-hour. Stored as a string.
+    localStorage.setItem('timeFormat',
+      String(parseInt(dict.TimeFormat.value, 10) || 0));
   }
   if (dict.LocationOverride !== undefined && dict.LocationOverride.value) {
     localStorage.setItem('locationOverride', dict.LocationOverride.value);

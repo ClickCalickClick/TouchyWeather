@@ -28,6 +28,8 @@
     "messageKeys": [
       "Theme",
       "Units",
+      "TimeFormat",
+      "ClockIs24h",
       "LocationOverride",
       "Temp",
       "FeelsLike",
