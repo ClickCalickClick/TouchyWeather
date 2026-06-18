@@ -363,6 +363,9 @@ void comm_request_refresh(void) {
   if (app_message_outbox_begin(&iter) != APP_MSG_OK) return;
   // Send a sentinel key to trigger PKJS fetch.
   dict_write_uint8(iter, MESSAGE_KEY_LastUpdated, 1);
+  // Tell PKJS the watch's system clock style so "Match watch" time format
+  // works. PKJS does all time formatting; only the C side knows this.
+  dict_write_uint8(iter, MESSAGE_KEY_ClockIs24h, clock_is_24h_style() ? 1 : 0);
   dict_write_end(iter);
   app_message_outbox_send();
 }

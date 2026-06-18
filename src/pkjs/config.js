@@ -23,6 +23,17 @@ module.exports = [
           { "label": "Light", "value": "0" },
           { "label": "Dark", "value": "1" }
         ]
+      },
+      {
+        "type": "radiogroup",
+        "messageKey": "TimeFormat",
+        "label": "Time format",
+        "defaultValue": "0",
+        "options": [
+          { "label": "Match watch",     "value": "0" },
+          { "label": "12-hour (2 PM)",  "value": "1" },
+          { "label": "24-hour (14:00)", "value": "2" }
+        ]
       }
     ]
   },
