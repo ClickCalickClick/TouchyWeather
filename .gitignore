@@ -20,6 +20,9 @@ friction.log
 .env.*
 *.env.local
 
+# Local planning docs
+plans/
+
 # Screenshots from local testing (keep repo screenshots/ folder)
 /screenshot*.png
 # *.png - removing to allow menu icons and other resources to be committed
