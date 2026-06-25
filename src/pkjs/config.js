@@ -116,6 +116,13 @@ module.exports = [
           "placeholder": "lat,lon",
           "limit": 32
         }
+      },
+      {
+        "type": "toggle",
+        "messageKey": "ShowLocation",
+        "label": "Show location",
+        "description": "Show the location name at the top of the main card.",
+        "defaultValue": false
       }
     ]
   },

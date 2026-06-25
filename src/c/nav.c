@@ -161,9 +161,11 @@ void nav_init(Window *window) {
   layer_set_update_proc(s_card_layer, card_layer_update);
   layer_add_child(root, s_card_layer);
 
-  // Page indicator overlay anchored near bottom safe-zone.
-  // emery: 200x228 → y=210; gabbro round 260x260 → y=224 (inside circle).
-  int indicator_y = PBL_IF_ROUND_ELSE(224, rb.size.h - 16);
+  // Page indicator overlay anchored near bottom safe-zone. Shared overlay
+  // drawn for every card, so it stays unified across cards.
+  // gabbro round 260x260 → y=229 (224 + 5, tracking the down-nudged layout).
+  // emery 200x228 → y = h-14 (was h-16; +2 to track the 2px down-nudge).
+  int indicator_y = PBL_IF_ROUND_ELSE(229, rb.size.h - 14);
   GRect ib = GRect(0, indicator_y, rb.size.w, 8);
   s_indicator_layer = layer_create(ib);
   layer_set_update_proc(s_indicator_layer, indicator_layer_update);

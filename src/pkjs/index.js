@@ -85,6 +85,10 @@ function getUseDewPoint() {
   return localStorage.getItem('useDewPoint') === '1';
 }
 
+function getShowLocation() {
+  return localStorage.getItem('showLocation') === '1';
+}
+
 // Returns true when coordinates are within continental Europe + UK +
 // Scandinavia. Open-Meteo CAMS pollen data is reliable inside this box;
 // outside it we fall back to the Google Pollen proxy.
@@ -260,6 +264,28 @@ function xhr(url, cb) {
   req.send();
 }
 
+// Best-effort reverse geocode for a human-readable city name. Uses
+// BigDataCloud's keyless client endpoint. Always invokes `done` with a
+// string: the freshly resolved name, or the last cached name, or '' —
+// never blocks or fails the weather fetch.
+function reverseGeocode(lat, lon, done) {
+  var url = 'https://api.bigdatacloud.net/data/reverse-geocode-client' +
+            '?latitude=' + lat + '&longitude=' + lon + '&localityLanguage=en';
+  xhr(url, function(err, data) {
+    if (err || !data) {
+      done(localStorage.getItem('lastLocationName') || '');
+      return;
+    }
+    var name = data.city || data.locality || data.principalSubdivision || '';
+    if (name) {
+      localStorage.setItem('lastLocationName', name);
+    } else {
+      name = localStorage.getItem('lastLocationName') || '';
+    }
+    done(name);
+  });
+}
+
 function fetchWeather(lat, lon) {
   lastLat = lat;
   lastLon = lon;
@@ -284,10 +310,15 @@ function fetchWeather(lat, lon) {
     '&current=us_aqi,grass_pollen,birch_pollen,alder_pollen,ragweed_pollen,mugwort_pollen,olive_pollen' +
     '&timezone=auto';
 
+  // Resolve the city name first (best-effort), then fetch weather so the
+  // name can ride along in the same AppMessage. reverseGeocode always
+  // calls back with a string, so a geocode failure never blocks weather.
+  reverseGeocode(lat, lon, function(locName) {
   xhr(fc, function(err, data) {
     if (err) { console.log('forecast err: ' + err.message); return; }
     xhr(aq, function(_e2, aqd) {
       var msg = {};
+      msg.LocationName = (locName || '').substring(0, 31);
       var gotPollenFromOpenMeteo = false;
       try {
         var cur = data.current || {};
@@ -298,6 +329,7 @@ function fetchWeather(lat, lon) {
         msg.Humidity = Math.round(cur.relative_humidity_2m);
         msg.DewPoint = Math.round(cur.dew_point_2m);
         msg.UseDewPoint = getUseDewPoint() ? 1 : 0;
+        msg.ShowLocation = getShowLocation() ? 1 : 0;
         msg.Wind = Math.round(cur.wind_speed_10m);
         msg.WindDir = degToCompass(cur.wind_direction_10m || 0);
         msg.Condition = mapWeatherCode(cur.weather_code);
@@ -343,15 +375,9 @@ function fetchWeather(lat, lon) {
         for (var i = 0; i < 5; i++) {
           msg['Precip' + i] = Math.round(p[startIdx + i] || 0);
         }
-        var alert = -1;
-        for (var j = 0; j < 5; j++) {
-          var pj = p[startIdx + j];
-          if (pj !== undefined && pj >= 50) {
-            alert = j === 0 ? 15 : j * 60;
-            break;
-          }
-        }
-        msg.RainAlertMinutes = alert;
+        // msg.RainAlertMinutes is computed below, once hPrcp (precip amount)
+        // is available — the pill is driven by measurable amount, not POP,
+        // so it agrees with the 6 Hours card's droplets.
         if (aqd && aqd.current) {
           msg.AQI = Math.round(aqd.current.us_aqi || 0);
         }
@@ -370,6 +396,18 @@ function fetchWeather(lat, lon) {
         var hWind  = hourly.wind_speed_10m || [];
         var hWdir  = hourly.wind_direction_10m || [];
         var hPrcp  = hourly.precipitation || [];
+
+        // Rain alert: first hour (now..+6h) with a *measurable* amount, using
+        // the same metric the 6 Hours card uses to draw a droplet
+        // (round(amount*10) > 0). This keeps the pill consistent with that
+        // card; the Precipitation card stays the separate "chance" (POP) view.
+        var alert = -1;
+        for (var j = 0; j <= 6; j++) {
+          var amt = Math.round((hPrcp[startIdx + j] || 0) * 10);
+          if (amt > 0) { alert = j === 0 ? 15 : j * 60; break; }
+        }
+        msg.RainAlertMinutes = alert;
+
         for (var hi = 1; hi <= 6; hi++) {
           var idx = startIdx + hi;
           var hourLabel = '';
@@ -461,6 +499,7 @@ function fetchWeather(lat, lon) {
         function(e) { console.log('send fail: ' + JSON.stringify(e)); }
       );
     });
+  });
   });
 }
 
@@ -796,6 +835,10 @@ Pebble.addEventListener('webviewclosed', function(e) {
   if (dict.UseDewPoint !== undefined) {
     localStorage.setItem('useDewPoint',
       dict.UseDewPoint.value ? '1' : '0');
+  }
+  if (dict.ShowLocation !== undefined) {
+    localStorage.setItem('showLocation',
+      dict.ShowLocation.value ? '1' : '0');
   }
   if (dict.TimeFormat !== undefined) {
     // "0" match watch, "1" 12-hour, "2" 24-hour. Stored as a string.

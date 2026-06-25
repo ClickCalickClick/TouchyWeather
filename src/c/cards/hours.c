@@ -7,17 +7,17 @@
 #include <stdio.h>
 
 // Phase 10A: Next 6 Hours card. 6 stacked rows of
-// (time, icon, temp, context). The context column is mutually exclusive
-// per row: when the hour is precipitating it shows a droplet + amount
-// (inches imperial / mm metric); otherwise it shows a compass arrow +
-// wind speed. Dry + calm rows collapse the column entirely. Showing only
-// one of the two guarantees the cluster fits even on gabbro's narrow
-// top/bottom rows.
+// (time, icon, temp, wind, precip). Wind (compass arrow + speed) is shown on
+// EVERY row so speed/direction are always glanceable; the rain droplet + amount
+// is an additional column that appears only on hours with measurable precip and
+// collapses entirely when the whole window is dry. This mirrors the always-on +
+// conditional two-column pattern in week.c (high/low always, pop conditional).
 //
-// Layout strategy: uniform-column cluster centering. We measure the
-// widest time, temp, and context across all 6 rows, then center the
-// `time | icon | temp | context` cluster horizontally. Rows align
-// because each column has a uniform width.
+// Layout strategy: uniform-column cluster centering. We measure the widest
+// time, temp, wind, and precip across all 6 rows, then center the
+// `time | icon | temp | wind | precip` cluster horizontally. Rows align
+// because each column has a uniform width. Gaps are tightened on rect (emery)
+// so the two context columns still fit within the 176px usable width.
 
 static GColor cond_accent(WeatherCondition cond) {
   switch (cond) {
@@ -33,28 +33,22 @@ static GColor cond_accent(WeatherCondition cond) {
   }
 }
 
-// Per-row context column kinds.
-typedef enum { CTX_NONE = 0, CTX_PRECIP, CTX_WIND } HourCtx;
+// Wind speed text for row i (always shown). Direction is the compass arrow.
+static void fmt_wind(const WeatherData *d, int i, char *buf, size_t n) {
+  snprintf(buf, n, "%d", d->hours_wind[i]);
+}
 
-// Decides which context column a row shows and formats its text into buf.
-// Returns the kind. Precip wins when there is a measurable amount.
-static HourCtx hour_ctx(const WeatherData *d, int i, char *buf, size_t n) {
-  if (d->hours_precip_x10[i] > 0) {
-    if (d->units == UNITS_METRIC) {
-      int mm = (d->hours_precip_x10[i] + 9) / 10; // ceil, always >= 1
-      snprintf(buf, n, "%dmm", mm);
-    } else {
-      int x = d->hours_precip_x10[i];
-      snprintf(buf, n, "%d.%d\"", x / 10, x % 10);
-    }
-    return CTX_PRECIP;
+// Precip amount for row i; returns false (empty buf) when the hour is dry.
+static bool fmt_precip(const WeatherData *d, int i, char *buf, size_t n) {
+  if (d->hours_precip_x10[i] <= 0) { buf[0] = '\0'; return false; }
+  if (d->units == UNITS_METRIC) {
+    int mm = (d->hours_precip_x10[i] + 9) / 10; // ceil, always >= 1
+    snprintf(buf, n, "%dmm", mm);
+  } else {
+    int x = d->hours_precip_x10[i];
+    snprintf(buf, n, "%d.%d\"", x / 10, x % 10);
   }
-  if (d->hours_wind[i] > 0) {
-    snprintf(buf, n, "%d", d->hours_wind[i]);
-    return CTX_WIND;
-  }
-  buf[0] = '\0';
-  return CTX_NONE;
+  return true;
 }
 
 void card_hours_draw(GContext *ctx, GRect bounds) {
@@ -69,24 +63,27 @@ void card_hours_draw(GContext *ctx, GRect bounds) {
   GFont row_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
   GFont pop_font = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
   int icon_size = 16;
-  int gap = 5;
+  // Gaps are tighter on rect so wind + precip both fit in 176px usable.
+  int gap = PBL_IF_ROUND_ELSE(5, 4);
   int row_h = PBL_IF_ROUND_ELSE(20, 19);
   int top_y = UI_HEADER_Y + UI_HEADER_HEIGHT + PBL_IF_ROUND_ELSE(10, 6);
 
   // Context column glyph widths.
   int drop_icon  = 10;
   int arrow_icon = 12;
-  int ctx_text_gap = 4;
+  int ctx_text_gap = PBL_IF_ROUND_ELSE(4, 3);
 
-  // Measure the widest time, temp, and context across all rows for
-  // uniform column widths. The context column collapses if every row is
-  // dry + calm.
+  // Measure the widest time, temp, wind (always), and precip (conditional)
+  // across all rows for uniform column widths. The precip column collapses
+  // when every hour is dry.
   GSize time_max = GSize(0, 0);
   GSize temp_max = GSize(0, 0);
-  int   ctx_max_w = 0;
-  bool  any_ctx = false;
+  int   wind_text_w = 0;    // widest speed text
+  int   precip_text_w = 0;  // widest amount text
+  bool  any_precip = false;
   char buf[12];
-  char ctxbuf[12];
+  char wbuf[12];
+  char pbuf[12];
   for (int i = 0; i < 6; ++i) {
     GSize ts = graphics_text_layout_get_content_size(d->hours_label[i],
         row_font, GRect(0,0,W,30), GTextOverflowModeTrailingEllipsis,
@@ -98,20 +95,27 @@ void card_hours_draw(GContext *ctx, GRect bounds) {
         GTextAlignmentLeft);
     if (ps.w > temp_max.w) temp_max = ps;
 
-    HourCtx kind = hour_ctx(d, i, ctxbuf, sizeof(ctxbuf));
-    if (kind != CTX_NONE) {
-      any_ctx = true;
-      GSize cs = graphics_text_layout_get_content_size(ctxbuf, pop_font,
+    fmt_wind(d, i, wbuf, sizeof(wbuf));
+    GSize ws = graphics_text_layout_get_content_size(wbuf, pop_font,
+        GRect(0,0,W,30), GTextOverflowModeTrailingEllipsis,
+        GTextAlignmentLeft);
+    if (ws.w > wind_text_w) wind_text_w = ws.w;
+
+    if (fmt_precip(d, i, pbuf, sizeof(pbuf))) {
+      any_precip = true;
+      GSize prs = graphics_text_layout_get_content_size(pbuf, pop_font,
           GRect(0,0,W,30), GTextOverflowModeTrailingEllipsis,
           GTextAlignmentLeft);
-      int glyph = (kind == CTX_PRECIP) ? drop_icon : arrow_icon;
-      int w = glyph + ctx_text_gap + cs.w;
-      if (w > ctx_max_w) ctx_max_w = w;
+      if (prs.w > precip_text_w) precip_text_w = prs.w;
     }
   }
 
+  int wind_col_w   = arrow_icon + ctx_text_gap + wind_text_w;
+  int precip_col_w = drop_icon + ctx_text_gap + precip_text_w;
+
   int cluster_w = time_max.w + gap + icon_size + gap + temp_max.w +
-                  (any_ctx ? (gap + ctx_max_w) : 0);
+                  gap + wind_col_w +
+                  (any_precip ? (gap + precip_col_w) : 0);
   int cluster_x = bounds.origin.x + (W - cluster_w) / 2;
   int floor_x = bounds.origin.x + UI_MARGIN_X;
   if (cluster_x < floor_x) cluster_x = floor_x;
@@ -136,26 +140,28 @@ void card_hours_draw(GContext *ctx, GRect bounds) {
         GRect(temp_x, row_y - 2, temp_max.w + 4, 22),
         GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
 
-    if (any_ctx) {
-      HourCtx kind = hour_ctx(d, i, ctxbuf, sizeof(ctxbuf));
-      int ctx_x = temp_x + temp_max.w + gap;
-      if (kind == CTX_PRECIP) {
-        icon_draw_droplet(ctx,
-            GPoint(ctx_x + drop_icon/2, icon_cy),
-            drop_icon, theme_accent_blue());
-        graphics_context_set_text_color(ctx, theme_accent_blue());
-        graphics_draw_text(ctx, ctxbuf, pop_font,
-            GRect(ctx_x + drop_icon + ctx_text_gap, row_y, ctx_max_w, 18),
-            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
-      } else if (kind == CTX_WIND) {
-        icon_draw_compass_arrow(ctx,
-            GPoint(ctx_x + arrow_icon/2, icon_cy),
-            arrow_icon, theme_fg(), d->hours_wind_dir[i]);
-        graphics_context_set_text_color(ctx, theme_fg());
-        graphics_draw_text(ctx, ctxbuf, pop_font,
-            GRect(ctx_x + arrow_icon + ctx_text_gap, row_y, ctx_max_w, 18),
-            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
-      }
+    // Wind (always): compass arrow (direction) + speed.
+    int wind_x = temp_x + temp_max.w + gap;
+    fmt_wind(d, i, wbuf, sizeof(wbuf));
+    icon_draw_compass_arrow(ctx,
+        GPoint(wind_x + arrow_icon/2, icon_cy),
+        arrow_icon, theme_fg(), d->hours_wind_dir[i]);
+    graphics_context_set_text_color(ctx, theme_fg());
+    graphics_draw_text(ctx, wbuf, pop_font,
+        GRect(wind_x + arrow_icon + ctx_text_gap, row_y, wind_text_w + 4, 18),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+
+    // Precip (only on wet hours): droplet + amount.
+    if (any_precip && fmt_precip(d, i, pbuf, sizeof(pbuf))) {
+      int precip_x = wind_x + wind_col_w + gap;
+      icon_draw_droplet(ctx,
+          GPoint(precip_x + drop_icon/2, icon_cy),
+          drop_icon, theme_accent_blue());
+      graphics_context_set_text_color(ctx, theme_accent_blue());
+      graphics_draw_text(ctx, pbuf, pop_font,
+          GRect(precip_x + drop_icon + ctx_text_gap, row_y,
+                precip_text_w + 4, 18),
+          GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
     }
   }
 

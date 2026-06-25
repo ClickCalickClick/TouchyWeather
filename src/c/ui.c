@@ -22,7 +22,10 @@ bool ui_draw_status_banner(GContext *ctx, GRect bounds,
   if (mode == STATUS_BANNER_RAIN && minutes_to_rain < 0) return false;
 
   // Sit above page indicator. On round we keep clear of the bottom arc.
-  int pad_bottom = PBL_IF_ROUND_ELSE(40, 22);
+  // Lowered (smaller pad) so the pill sits where the main card's down-nudged
+  // layout placed it — round 40→35 (-5), rect 22→20 (-2) — keeping the pill
+  // position uniform across every card.
+  int pad_bottom = PBL_IF_ROUND_ELSE(35, 20);
   int banner_h = 22;
   int banner_w = PBL_IF_ROUND_ELSE(140, 130);
   GRect r = GRect(bounds.origin.x + (bounds.size.w - banner_w) / 2,
@@ -41,7 +44,13 @@ bool ui_draw_status_banner(GContext *ctx, GRect bounds,
 
   char buf[32];
   if (mode == STATUS_BANNER_RAIN) {
-    snprintf(buf, sizeof(buf), "RAIN IN %dM", minutes_to_rain);
+    // Lead times of an hour or more read as hours ("RAIN IN 4H") so the pill
+    // doesn't look like an imminent minute-countdown; sub-hour stays minutes.
+    if (minutes_to_rain >= 60) {
+      snprintf(buf, sizeof(buf), "RAIN IN %dH", minutes_to_rain / 60);
+    } else {
+      snprintf(buf, sizeof(buf), "RAIN IN %dM", minutes_to_rain);
+    }
   } else {
     prv_format_ago(last_updated_secs, buf, sizeof(buf));
   }

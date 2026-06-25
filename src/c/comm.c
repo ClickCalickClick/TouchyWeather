@@ -41,7 +41,10 @@ static void prv_bg_exit(void *data);
 // Bumped 104 -> 105 when Week Ahead grew from 4 to 5 days (days_* arrays
 // enlarged, shifting every field after them — an old 4-day blob would
 // misalign and render a stale/garbage 5th day until the next fetch).
-#define PERSIST_KEY_CACHE 105
+// Bumped 105 -> 106 when location_name[32] was added to WeatherData
+// (shifts every field after sunset[8]; an old blob would misalign).
+// Bumped 106 -> 107 when show_location bool was added to WeatherData.
+#define PERSIST_KEY_CACHE 107
 
 static void prv_save_cache(void) {
   WeatherData *d = weather_data_get();
@@ -118,6 +121,9 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
   if ((t = dict_find(iter, MESSAGE_KEY_UseDewPoint))) {
     d->use_dew_point = (t->value->int32 != 0);
   }
+  if ((t = dict_find(iter, MESSAGE_KEY_ShowLocation))) {
+    d->show_location = (t->value->int32 != 0);
+  }
   if ((t = dict_find(iter, MESSAGE_KEY_LoopNavigation))) {
     settings_set_loop_nav(t->value->int32 != 0);
   }
@@ -168,6 +174,10 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
   if ((t = dict_find(iter, MESSAGE_KEY_Sunset))) {
     strncpy(d->sunset, t->value->cstring, sizeof(d->sunset) - 1);
     d->sunset[sizeof(d->sunset) - 1] = '\0';
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_LocationName))) {
+    strncpy(d->location_name, t->value->cstring, sizeof(d->location_name) - 1);
+    d->location_name[sizeof(d->location_name) - 1] = '\0';
   }
   if ((t = dict_find(iter, MESSAGE_KEY_RainAlertMinutes))) { d->rain_alert_min = t->value->int32; }
   if ((t = dict_find(iter, MESSAGE_KEY_Units))) { d->units = (Units)t->value->int32; }
