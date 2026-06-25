@@ -792,7 +792,28 @@ function fetchRadar() {
 
 Pebble.addEventListener('ready', function() {
   console.log('TouchyWeather PKJS ready');
-  locateAndFetch();
+  // Re-sync the configured background interval to the watch. Persist storage is
+  // wiped on reinstall/update, resetting the C side to 0 (disabled), but Clay's
+  // own localStorage still holds the user's choice. Without this, background
+  // updates stay off until the user manually re-saves Clay. Reading Clay's
+  // 'clay-settings' store (not a new key) means this also recovers users who
+  // already updated to the buggy build.
+  var interval = null;
+  try {
+    var saved = JSON.parse(localStorage.getItem('clay-settings') || '{}');
+    if (saved.BackgroundUpdateInterval !== undefined) {
+      interval = parseInt(saved.BackgroundUpdateInterval, 10) || 0;
+    }
+  } catch (e) { /* corrupt store -> skip resync */ }
+
+  if (interval !== null) {
+    console.log('Re-syncing BackgroundUpdateInterval=' + interval + ' to watch');
+    Pebble.sendAppMessage({ BackgroundUpdateInterval: interval },
+      function() { locateAndFetch(); },
+      function() { locateAndFetch(); });
+  } else {
+    locateAndFetch();
+  }
 });
 
 Pebble.addEventListener('appmessage', function(e) {
