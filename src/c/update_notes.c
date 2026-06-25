@@ -7,9 +7,15 @@
 #include "version_gen.h"
 #include <string.h>
 
-// Persisted code of the last release whose notes the user has seen. Distinct
-// from the other persist keys (1=theme, 105=cache, 200+=settings, 300=wakeup).
-#define PERSIST_KEY_NOTES_VERSION 106
+// Persisted code of the last release whose notes the user has seen. This MUST
+// stay clear of every other persist key — most importantly PERSIST_KEY_CACHE,
+// which is bumped on every WeatherData layout change and has marched 100 -> 107.
+// This key used to be 106, which COLLIDED once the cache reached 106: each
+// weather save then overwrote the seen-version int, so the notes screen
+// re-popped on every launch instead of once per update. Moved to 400 — well
+// clear of the cache's incrementing path and of 1=theme, 200-220=settings,
+// 300=wakeup. Do not place it back inside the cache's range.
+#define PERSIST_KEY_NOTES_VERSION 400
 
 // Poetic, on-brand headline (matches the app's "Checking the horizon..." voice).
 // One-line change if you want different copy.

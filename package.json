@@ -1,7 +1,7 @@
 {
   "name": "TouchyWeather",
   "author": "MakeAwesomeHappen",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "keywords": [
     "pebble-app"
   ],
@@ -31,6 +31,7 @@
       "TimeFormat",
       "ClockIs24h",
       "LocationOverride",
+      "LocationName",
       "Temp",
       "FeelsLike",
       "High",
@@ -137,6 +138,7 @@
       "RadarTimestamp",
       "EnabledMask",
       "UseDewPoint",
+      "ShowLocation",
       "DewPoint",
       "PollenLevel",
       "LoopNavigation",

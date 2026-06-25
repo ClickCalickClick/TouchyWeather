@@ -4,6 +4,11 @@ All notable changes to TouchyWeather. The top entry is the newest release; the
 build reads it to generate the in-app "What's New" screen, so keep the most
 recent version at the top with `## x.y.z` and one bullet (`- `) per line.
 
+## 1.11.0
+- Show your location on the main screen — turn it on in Settings.
+- The 6-hour forecast now always shows wind speed and direction.
+- Smarter rain alerts, now based on expected rainfall.
+
 ## 1.10.0
 - Choose your clock format — 12-hour, 24-hour, or match your watch — in Settings.
 
