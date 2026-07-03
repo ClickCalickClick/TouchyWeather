@@ -62,7 +62,16 @@ void card_air_quality_draw(GContext *ctx, GRect bounds) {
   // Half-arc gauge — same style as UV (consistent visual language).
   // AQI 0..300 maps to 0..180°. Values >300 max out the arc but the
   // numeric label still reads truthfully.
+  // Small classes shrink the radius so the value/label/pollen badge clear the
+  // bottom banner on the short screens (Phase 5.2, same as UV). Large classes
+  // keep verbatim values -> emery/gabbro byte-identical.
+#if defined(UI_SCREEN_SMALL_ROUND)
+  int radius = 42;
+#elif defined(UI_SCREEN_SMALL_RECT)
+  int radius = 44;
+#else
   int radius = PBL_IF_ROUND_ELSE(72, 64);
+#endif
   int thickness = 10;
   GPoint c = { ox + W/2, header_y + UI_HEADER_HEIGHT + 8 + radius };
   GRect arc_box = GRect(c.x - radius, c.y - radius, radius*2, radius*2);
@@ -79,19 +88,28 @@ void card_air_quality_draw(GContext *ctx, GRect bounds) {
                        DEG_TO_TRIGANGLE(-90),
                        DEG_TO_TRIGANGLE(-90 + sweep_deg));
 
+  // Small classes lift the value box and tighten the label/pollen offsets (and
+  // drop the pollen badge to the caption font) so all elements clear the
+  // shrunken gauge and the banner.
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  int num_top = c.y - 38, num_h = 44, label_dy = 4, pollen_dy = 22;
+#else
+  int num_top = c.y - 32, num_h = 50, label_dy = 18, pollen_dy = 40;
+#endif
+
   // Big AQI number inside, colored by category.
   char buf[8]; snprintf(buf, sizeof(buf), "%d", d->aqi);
   graphics_context_set_text_color(ctx, cat);
   graphics_draw_text(ctx, buf,
       ui_font_number(),
-      GRect(c.x - radius, c.y - 32, radius*2, 50),
+      GRect(c.x - radius, num_top, radius*2, num_h),
       GTextOverflowModeFill, GTextAlignmentCenter, NULL);
 
   // Label below — also colored by category.
   graphics_context_set_text_color(ctx, cat);
   graphics_draw_text(ctx, aqi_label(d->aqi),
       ui_font_header(),
-      GRect(ox, c.y + 18, W, 24),
+      GRect(ox, c.y + label_dy, W, 24),
       GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
 
   // Pollen badge (Google UPI 0..5). Skipped when uncovered (-1) so the
@@ -108,8 +126,13 @@ void card_air_quality_draw(GContext *ctx, GRect bounds) {
     else               { plabel = "POLLEN: VERY HIGH";    pcolor = GColorRed; }
     graphics_context_set_text_color(ctx, pcolor);
     graphics_draw_text(ctx, plabel,
+        // Small classes drop the badge to the caption font to fit.
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+        ui_font_caption(),
+#else
         ui_font_header(),
-        GRect(ox, c.y + 40, W, 24),
+#endif
+        GRect(ox, c.y + pollen_dy, W, 24),
         GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
   }
 
