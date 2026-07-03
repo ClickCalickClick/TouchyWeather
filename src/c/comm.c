@@ -9,6 +9,7 @@
 #include <stdlib.h>
 
 static CommUpdateCb s_update_cb = NULL;
+static CommVisibilityCb s_visibility_cb = NULL;
 
 // Background update state
 static int s_bg_fail_count = 0;
@@ -142,6 +143,42 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
     bool on = (t->type == TUPLE_CSTRING) ? (atoi(t->value->cstring) != 0)
                                          : (t->value->int32 != 0);
     settings_set_select_toggles_theme(on);
+  }
+  // Phase 2.2: per-card visibility from Clay. Only applied when the user has
+  // opted into phone control (PhoneManagesCards); otherwise on-watch card
+  // management is left untouched. Card ORDER always stays on-watch.
+  if ((t = dict_find(iter, MESSAGE_KEY_PhoneManagesCards))) {
+    bool on = (t->type == TUPLE_CSTRING) ? (atoi(t->value->cstring) != 0)
+                                         : (t->value->int32 != 0);
+    settings_set_phone_manages_cards(on);
+  }
+  if (settings_get_phone_manages_cards()) {
+    // Message key → ToggleId. Keys carry 1 = show, 0 = hide per card.
+    // Not static: MESSAGE_KEY_* are runtime symbols, not constant expressions.
+    const struct { uint32_t key; ToggleId tid; } vis_map[] = {
+      { MESSAGE_KEY_CardEnabledHours,  TOGGLE_HOURS  },
+      { MESSAGE_KEY_CardEnabledWeek,   TOGGLE_WEEK   },
+      { MESSAGE_KEY_CardEnabledPrecip, TOGGLE_PRECIP },
+      { MESSAGE_KEY_CardEnabledUV,     TOGGLE_UV     },
+      { MESSAGE_KEY_CardEnabledAQ,     TOGGLE_AQ     },
+      { MESSAGE_KEY_CardEnabledSun,    TOGGLE_SUN    },
+      { MESSAGE_KEY_CardEnabledNight,  TOGGLE_NIGHT  },
+      { MESSAGE_KEY_CardEnabledGolden, TOGGLE_GOLDEN },
+      { MESSAGE_KEY_CardEnabledRadar,  TOGGLE_RADAR  },
+      { MESSAGE_KEY_CardEnabledAdvice, TOGGLE_ADVICE },
+    };
+    bool vis_changed = false;
+    for (unsigned i = 0; i < sizeof(vis_map) / sizeof(vis_map[0]); ++i) {
+      Tuple *vt = dict_find(iter, vis_map[i].key);
+      if (!vt) continue;
+      bool en = (vt->type == TUPLE_CSTRING) ? (atoi(vt->value->cstring) != 0)
+                                            : (vt->value->int32 != 0);
+      settings_set_enabled(vis_map[i].tid, en);
+      vis_changed = true;
+    }
+    // Re-apply the (now-updated) enable flags to nav so the rotation and page
+    // dots reflect Clay immediately.
+    if (vis_changed && s_visibility_cb) s_visibility_cb();
   }
   if ((t = dict_find(iter, MESSAGE_KEY_BackgroundUpdateInterval))) {
     int old_interval = settings_get_background_interval();
@@ -407,6 +444,10 @@ void comm_request_radar(void) {
 
 void comm_set_update_callback(CommUpdateCb cb) {
   s_update_cb = cb;
+}
+
+void comm_set_visibility_callback(CommVisibilityCb cb) {
+  s_visibility_cb = cb;
 }
 
 static void prv_initial_refresh(void *ctx) {

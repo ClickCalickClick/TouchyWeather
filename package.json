@@ -144,7 +144,18 @@
       "LoopNavigation",
       "BackgroundUpdateInterval",
       "AnimationsEnabled",
-      "SelectTogglesTheme"
+      "SelectTogglesTheme",
+      "PhoneManagesCards",
+      "CardEnabledHours",
+      "CardEnabledWeek",
+      "CardEnabledPrecip",
+      "CardEnabledUV",
+      "CardEnabledAQ",
+      "CardEnabledSun",
+      "CardEnabledNight",
+      "CardEnabledGolden",
+      "CardEnabledRadar",
+      "CardEnabledAdvice"
     ],
     "resources": {
     "media": [

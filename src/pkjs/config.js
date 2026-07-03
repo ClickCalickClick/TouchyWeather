@@ -119,6 +119,82 @@ module.exports = [
     "items": [
       {
         "type": "heading",
+        "defaultValue": "Card Visibility"
+      },
+      {
+        "type": "toggle",
+        "messageKey": "PhoneManagesCards",
+        "label": "Manage cards from phone",
+        "description": "Off by default: show/hide cards on the watch (Settings card). Turn this ON to control card visibility from here instead. When you turn it on and save, the toggles below take over — set them to match what you want. Card ORDER is always changed on the watch.",
+        "defaultValue": false
+      },
+      {
+        "type": "toggle",
+        "messageKey": "CardEnabledHours",
+        "label": "6 Hours",
+        "defaultValue": true
+      },
+      {
+        "type": "toggle",
+        "messageKey": "CardEnabledWeek",
+        "label": "Week Ahead",
+        "defaultValue": true
+      },
+      {
+        "type": "toggle",
+        "messageKey": "CardEnabledPrecip",
+        "label": "Rain / Precipitation",
+        "defaultValue": true
+      },
+      {
+        "type": "toggle",
+        "messageKey": "CardEnabledUV",
+        "label": "UV Index",
+        "defaultValue": true
+      },
+      {
+        "type": "toggle",
+        "messageKey": "CardEnabledAQ",
+        "label": "Air Quality",
+        "defaultValue": true
+      },
+      {
+        "type": "toggle",
+        "messageKey": "CardEnabledSun",
+        "label": "Sun Cycle",
+        "defaultValue": true
+      },
+      {
+        "type": "toggle",
+        "messageKey": "CardEnabledNight",
+        "label": "Night Sky",
+        "defaultValue": true
+      },
+      {
+        "type": "toggle",
+        "messageKey": "CardEnabledGolden",
+        "label": "Golden Hour",
+        "defaultValue": true
+      },
+      {
+        "type": "toggle",
+        "messageKey": "CardEnabledRadar",
+        "label": "Radar",
+        "defaultValue": true
+      },
+      {
+        "type": "toggle",
+        "messageKey": "CardEnabledAdvice",
+        "label": "Touch & Go (advice)",
+        "defaultValue": true
+      }
+    ]
+  },
+  {
+    "type": "section",
+    "items": [
+      {
+        "type": "heading",
         "defaultValue": "Location"
       },
       {

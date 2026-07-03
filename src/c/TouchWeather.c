@@ -285,6 +285,8 @@ static void prv_init(void) {
   // Load cached data BEFORE first window draw to prevent units flash.
   // The callback must be set first so comm_load_cache() can trigger a redraw.
   comm_set_update_callback(nav_redraw);
+  // Re-apply on-watch enable flags to nav when Clay changes card visibility.
+  comm_set_visibility_callback(prv_apply_card_visibility);
   comm_load_cache();
 
   s_window = window_create();

@@ -219,3 +219,54 @@ reverse**. Newest phase last. This is Jared's morning review sheet.
   2. If long-BACK can't work on hardware either: keep terminal card (current),
      or revisit double-tap BACK (you rejected it, but it *is* deliverable). I did
      not re-litigate your double-tap rejection.
+
+### 2.2. Clay card-visibility sync — opt-in master toggle; per-card keys (not EnabledMask)
+- **What:** Added phone-side control of per-card visibility, gated behind a new
+  opt-in master toggle `PhoneManagesCards` (default **off**). When on, incoming
+  Clay `CardEnabled*` toggles (one per toggleable card) are applied to the
+  on-watch enable flags (persist 210–219) and re-synced to nav. When off,
+  on-watch card management is untouched. Card **reorder** stays on-watch (Clay
+  has no drag-reorder), per the doc's hybrid recommendation.
+- **Deviation 1 — opt-in master toggle instead of "Clay authoritative by default":**
+  The `showConfiguration` handler opens Clay from its own localStorage (no seed
+  from the watch), so a naive "Clay wins on save" would **silently wipe**
+  carefully-curated on-watch card config the first time a user opens Clay for
+  any reason and saves. Making it opt-in avoids that. Bonus: default-off means
+  the new decode path is dormant, so shipping it — which can't be fully
+  round-trip-tested in the emulator (Clay config is interactive) — cannot
+  regress existing users. Reverse/upgrade path: implement a watch→Clay seed on
+  `showConfiguration` (send current visibility to PKJS, inject into Clay's
+  persisted settings before `generateUrl`) and then the master toggle can be
+  retired / defaulted on. Noted: turning the master toggle ON adopts Clay's
+  current toggle state (defaults all-on on first open), so first opt-in shows
+  all cards — the user then curates from the phone. Documented in the toggle's
+  Clay description.
+- **Deviation 2 — per-card message keys instead of the `EnabledMask` bitmask:**
+  The doc suggested reusing the unused `EnabledMask` key. But Clay toggles each
+  need their own messageKey regardless, so a bitmask saves no Clay keys and adds
+  fragile JS packing (build mask, strip raw keys from the outgoing message).
+  Per-card keys (`CardEnabledHours`…`CardEnabledAdvice`) round-trip natively
+  through Clay with **zero index.js changes** and decode with the same
+  `dict_find` + `atoi`/int32 pattern as the other settings. `EnabledMask`
+  remains unused. Reverse: switch to a single `EnabledMask` int + JS packing if
+  the extra 10 keys ever matter (they don't today).
+- **Key assignments:** persist **205 = `PhoneManagesCards`**. This shifts the
+  phase docs' suggested 205 (`AutoHidePrecip`, Phase 3.2) → **206**, and
+  `BigMode` (Phase 3.1) → **207**. New message keys: `PhoneManagesCards` + 10
+  `CardEnabled*`. No `WeatherData` change → no cache bump.
+- **Impl note:** `MESSAGE_KEY_*` are runtime symbols on this SDK, not constant
+  expressions, so the key→ToggleId map is an **automatic** (non-static) local
+  array in `comm.c` — a `static const` initializer fails to compile.
+- **Verification:** Build green. `config.js` parses (node require). Watch-side
+  apply path verified end-to-end via a temporary injection (set
+  `PhoneManagesCards`+disable Radar, reverted): the Settings card showed Radar
+  **unchecked**, and nav-prev from Settings landed on **Golden Hour, skipping
+  the disabled Radar** — so `settings_set_enabled` → `prv_apply_card_visibility`
+  → `nav_set_enabled` works. The **Clay phone→watch round-trip itself was not
+  runtime-tested** (emulator `emu-app-config` is an interactive browser; no way
+  to script toggle+save). The decode mirrors three shipped settings, and the
+  feature is off by default. Worth a real-phone Clay save check before release.
+- **Emulator note:** the temp test left the emery emulator's *persist* with
+  Radar disabled + `PhoneManagesCards=true` (harmless; committed code defaults
+  are off/enabled). Cold-boot the emulator to clear it if a later check needs
+  Radar visible.

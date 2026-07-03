@@ -63,6 +63,14 @@ void settings_set_animations_enabled(bool enabled);
 bool settings_get_select_toggles_theme(void);
 void settings_set_select_toggles_theme(bool enabled);
 
+// Opt-in: when true, the phone (Clay) controls per-card visibility — incoming
+// Clay CardEnabled* toggles are applied to the on-watch enable flags. Default
+// false, so on-watch card management is unaffected unless the user opts in
+// (this avoids a Clay save silently wiping carefully-curated on-watch config).
+// Card REORDER always stays on-watch regardless. Persisted.
+bool settings_get_phone_manages_cards(void);
+void settings_set_phone_manages_cards(bool enabled);
+
 bool settings_get_enabled(ToggleId id);
 void settings_set_enabled(ToggleId id, bool enabled);
 
