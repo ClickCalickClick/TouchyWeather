@@ -211,6 +211,11 @@ void settings_set_auto_hidden(ToggleId id, bool hidden) {
 
 bool settings_get_effective_enabled(ToggleId id) {
   if (id >= SETTINGS_TOGGLEABLE_COUNT) return true;
+#if !defined(TW_RADAR_SUPPORTED)
+  // Radar is carved out on non-128KB / B&W platforms (see settings.h): force
+  // it effectively-off so nav skips it and its 25.6KB buffer never allocates.
+  if (id == TOGGLE_RADAR) return false;
+#endif
   return s_enabled[id] && !s_auto_hidden[id];
 }
 

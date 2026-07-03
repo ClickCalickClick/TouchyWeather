@@ -34,6 +34,22 @@ typedef enum {
   TOGGLE_ADVICE,
 } ToggleId;
 
+// --- Radar platform carve-out (Phase 5) ---
+// The radar card needs ~51KB of peak heap (a 25.6KB staging buffer plus a
+// 25.6KB GBitmap coexist while assembling a frame). Only the 128KB App RAM
+// platforms — emery and gabbro — can spare it; a measured basalt build has
+// just 14KB free heap, so the buffer malloc would fail. B&W platforms can't
+// use a color radar image anyway. On every non-128KB platform we therefore
+// carve radar out of the carousel (settings_get_effective_enabled forces it
+// off, so nav skips it exactly like a user-disabled card, and the card is
+// never navigated to -> its buffer is never allocated -> no OOM).
+//
+// TOGGLE_RADAR keeps its id and persist key (KEY_TOGGLE_BASE + 8) on ALL
+// platforms so a user's settings survive if their data roams across watches.
+#if defined(PBL_PLATFORM_EMERY) || defined(PBL_PLATFORM_GABBRO)
+#  define TW_RADAR_SUPPORTED 1
+#endif
+
 void settings_load(void);
 
 // Card-navigation loop preference. When true (default), pressing UP on the
