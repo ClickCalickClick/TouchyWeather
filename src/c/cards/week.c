@@ -43,11 +43,28 @@ void card_week_draw(GContext *ctx, GRect bounds) {
                                 theme_fg(),
                                 UI_HEADER_Y, 18, icon_draw_calendar);
 
+  // Small classes (144x168 / 180x180): 5 day-rows in the 18px header font
+  // overflow the bottom banner (the last 1-2 days were buried). Drop to the
+  // 14px bold label font and a 16px row height so all 5 fit; the top_y clamp
+  // below then floors the block just under the header (Phase 5.2). Large
+  // classes keep verbatim values -> emery/gabbro byte-identical.
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  GFont row_font = ui_font_label();
+#else
   GFont row_font = ui_font_header();
+#endif
   GFont pop_font = ui_font_label();
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  int icon_size = 14;
+#else
   int icon_size = 16;
+#endif
   int gap = 6;
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  int row_h = 16;
+#else
   int row_h = PBL_IF_ROUND_ELSE(28, 26);
+#endif
 
   // Vertically center the block of rows in the region between the bottom of
   // the "WEEK AHEAD" header ink and the top of the "UPDATED" pill. The header
@@ -121,7 +138,11 @@ void card_week_draw(GContext *ctx, GRect bounds) {
 
   for (int i = 0; i < DAY_COUNT; ++i) {
     int row_y = top_y + i * row_h;
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+    int center_y = row_y + 8;   // center icons on the shorter 14px small-class row
+#else
     int center_y = row_y + 11;
+#endif
 
     // Day label.
     graphics_context_set_text_color(ctx, theme_fg());
