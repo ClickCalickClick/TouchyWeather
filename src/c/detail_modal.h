@@ -10,6 +10,7 @@ typedef enum {
   DETAIL_NONE = 0,
   DETAIL_HOURS,   // 6 Hours → temperature trend (SELECT toggles POP overlay)
   DETAIL_PRECIP,  // Precipitation → hourly rainfall amounts
+  DETAIL_WEEK,    // Week → one page per day (UP/DOWN page days)
 } DetailType;
 
 void detail_modal_init(Window *window);

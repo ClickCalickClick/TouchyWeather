@@ -413,3 +413,44 @@ graph has Stage A before Phase 5 before Big Mode.
   falls through to theme toggle. (Verified precip via a temporary card remap —
   reverted — because this emulator's precip card is user-disabled in persist
   from an earlier stray settings tap.)
+
+---
+
+## Phase 4 (cont.) — resumed 2026-07-03 (afternoon session)
+
+Jared reviewed the overnight run, confirmed all 8 commits, and set this session
+on autopilot to **finish the Phase 4 forecast modals + add a swipe-up gesture**,
+then stop for review. Ordering (my call, he said "decide what's best"):
+Week → UV+AQI (batched) → swipe-up. Scope stops after those; the Settings-in-Clay
+opt-out is explicitly a **later** session (see the Settings-opt-out entry below).
+
+### 4.3. Week detail modal — paged-by-day (3rd of 5 forecast modals)
+- **What:** Added `DETAIL_WEEK`. SELECT-long on the **Week Ahead** card opens a
+  bottom sheet with one page per day (5 days). Each page: day label in the header
+  chrome (calendar icon), large condition icon, **HIGH / LOW** columns (LECO_28;
+  HIGH tinted by condition per the Week card's palette, LOW in secondary), a
+  centered droplet + POP% row, and a **page-dot indicator** (filled = current
+  day). **UP/DOWN page** prev/next day (clamped, no wrap); BACK dismisses; other
+  in-modal gestures unchanged. Zero new plumbing — uses existing `days_*` fields.
+- **Judgment calls:**
+  - **Paged-by-day, not one long scroll** — the phase doc's recommended default;
+    fits the 5-day dataset cleanly and reuses the page-dot vocabulary.
+  - **No wrap on UP/DOWN paging** (clamp at day 0 / day 4) — a paged modal with 5
+    discrete pages reads more predictably clamped; matches the page dots.
+  - **POP row is height-guarded** (`if (pop_y + 18 <= content_bottom)`) so it
+    self-omits on short sheets (e.g. a 144×168 basalt where the 80% sheet is
+    ~134px) rather than colliding with the dots. On emery/gabbro it always fits.
+    Had to tighten the icon/column spacing after a first pass pushed POP below the
+    fold on emery — now verified visible.
+  - Renderer kept **in `detail_modal.c`** (dispatched by `DetailType`), consistent
+    with the existing Hours/Precip renderers — not split into `cards/week.c`.
+    Same reverse path noted in 4.1/4.2 applies.
+- **Verification (emery emulator, screenshots):** SELECT-long on Week Ahead opens
+  the sheet on FRI (HIGH 70 / LOW 50 / 0%); DOWN×2 pages to SUN (rain-cloud icon,
+  HIGH 71 / LOW 58 / **30%**, 3rd dot filled) — condition icon, numbers, POP, and
+  dots all update; card nav stays locked while paging; BACK returns to the Week
+  Ahead card. ✅
+- **Note (emulator input):** the emery emulator drops button events
+  intermittently and its persist survives restarts (Touch & Go re-enabled itself
+  between installs), so card indices shifted mid-test — drove nav one press at a
+  time with screenshots to stay oriented. Not a code issue.

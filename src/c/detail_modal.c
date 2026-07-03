@@ -37,6 +37,7 @@ static int s_slide_to = 0;
 
 // Per-modal transient state.
 static bool s_pop_overlay = false;  // 6 Hours: show POP series over temp trend
+static int  s_week_page = 0;        // Week: which day (0..4) is shown
 
 static uint64_t prv_now_ms(void) {
   time_t s; uint16_t ms;
@@ -263,6 +264,99 @@ static void prv_draw_precip(GContext *ctx) {
   }
 }
 
+// High-temp accent by condition, mirroring the Week card's palette rules.
+static GColor prv_high_color(WeatherCondition cond) {
+  switch (cond) {
+    case COND_SUNNY:
+    case COND_PARTLY_CLOUDY: return theme_accent_orange();
+    case COND_RAIN:
+    case COND_SNOW:
+    case COND_STORM:         return theme_accent_blue();
+    default:                 return theme_fg();
+  }
+}
+
+// Week → one page per day (5). Big condition icon, HIGH/LOW columns, POP row,
+// and a page-dot indicator. UP/DOWN page between days.
+#define WEEK_DAYS 5
+static void prv_draw_week(GContext *ctx) {
+  WeatherData *d = weather_data_get();
+  int p = s_week_page;
+  if (p < 0) p = 0;
+  if (p >= WEEK_DAYS) p = WEEK_DAYS - 1;
+
+  // Header title = the day label; calendar icon in the chrome.
+  int top = prv_draw_chrome(ctx, d->days_label[p], icon_draw_calendar);
+  int cx = s_screen_w / 2;
+
+  // Reserve the bottom strip for the page dots.
+  int dots_h = 16;
+  int content_bottom = s_sheet_h - dots_h - 4;
+
+  // Big condition icon, centered horizontally near the top of the content.
+  int icon_size = 42;
+  int icon_cy = top + icon_size / 2 + 6;
+  icon_draw_condition(ctx, GPoint(cx, icon_cy), icon_size, d->days_cond[p]);
+
+  // HIGH / LOW columns beneath the icon.
+  GFont numf = fonts_get_system_font(FONT_KEY_LECO_28_LIGHT_NUMBERS);
+  GFont capf = fonts_get_system_font(FONT_KEY_GOTHIC_14);
+  int col_w = s_screen_w / 2;
+  int caps_y = icon_cy + icon_size / 2 + 4;
+  int nums_y = caps_y + 15;
+  char hb[8], lb[8];
+  snprintf(hb, sizeof(hb), "%d°", d->days_high[p]);
+  snprintf(lb, sizeof(lb), "%d°", d->days_low[p]);
+
+  graphics_context_set_text_color(ctx, theme_muted());
+  graphics_draw_text(ctx, "HIGH", capf, GRect(0, caps_y, col_w, 15),
+                     GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+  graphics_draw_text(ctx, "LOW", capf, GRect(col_w, caps_y, col_w, 15),
+                     GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+
+  graphics_context_set_text_color(ctx, prv_high_color(d->days_cond[p]));
+  graphics_draw_text(ctx, hb, numf, GRect(0, nums_y, col_w, 32),
+                     GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+  graphics_context_set_text_color(ctx, theme_secondary());
+  graphics_draw_text(ctx, lb, numf, GRect(col_w, nums_y, col_w, 32),
+                     GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+
+  // POP row (droplet + %), centered under the columns.
+  int pop_y = nums_y + 32;
+  if (pop_y + 18 <= content_bottom) {
+    char pb[8];
+    snprintf(pb, sizeof(pb), "%d%%", (int)d->days_pop[p]);
+    GFont pf = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+    GSize ps = graphics_text_layout_get_content_size(pb, pf,
+        GRect(0, 0, s_screen_w, 22), GTextOverflowModeFill, GTextAlignmentLeft);
+    int drop = 12;
+    int grp_w = drop + 4 + ps.w;
+    int gx = cx - grp_w / 2;
+    icon_draw_droplet(ctx, GPoint(gx + drop / 2, pop_y + 9), drop,
+                      theme_accent_blue());
+    graphics_context_set_text_color(ctx, theme_accent_blue());
+    graphics_draw_text(ctx, pb, pf, GRect(gx + drop + 4, pop_y, ps.w + 4, 22),
+                       GTextOverflowModeFill, GTextAlignmentLeft, NULL);
+  }
+
+  // Page dots: filled for the current day, outlined for the rest.
+  int dot_r = 3;
+  int spacing = 12;
+  int total_w = (WEEK_DAYS - 1) * spacing;
+  int dx = cx - total_w / 2;
+  int dy = s_sheet_h - dots_h / 2 - 2;
+  for (int i = 0; i < WEEK_DAYS; i++) {
+    GPoint c = GPoint(dx + i * spacing, dy);
+    if (i == p) {
+      graphics_context_set_fill_color(ctx, theme_fg());
+      graphics_fill_circle(ctx, c, dot_r);
+    } else {
+      graphics_context_set_stroke_color(ctx, theme_muted());
+      graphics_draw_circle(ctx, c, dot_r);
+    }
+  }
+}
+
 static void prv_update(Layer *layer, GContext *ctx) {
   (void)layer;
   GRect b = layer_get_bounds(s_layer);
@@ -277,6 +371,7 @@ static void prv_update(Layer *layer, GContext *ctx) {
   switch (s_type) {
     case DETAIL_HOURS:  prv_draw_hours(ctx);  break;
     case DETAIL_PRECIP: prv_draw_precip(ctx); break;
+    case DETAIL_WEEK:   prv_draw_week(ctx);   break;
     default: break;
   }
 }
@@ -314,6 +409,7 @@ bool detail_modal_open(DetailType type) {
   if (refresh_sheet_is_active()) return false;  // one overlay at a time
   s_type = type;
   s_pop_overlay = false;
+  s_week_page = 0;
   s_state = DM_OPENING;
   s_top_y = s_screen_h;
   prv_start_slide(s_screen_h - s_sheet_h);
@@ -332,8 +428,19 @@ bool detail_modal_handle_back(void) {
   return true;
 }
 
-bool detail_modal_handle_up(void)   { return detail_modal_is_active(); }
-bool detail_modal_handle_down(void) { return detail_modal_is_active(); }
+// Week is paged by day: UP/DOWN move to the previous/next day (clamped, no
+// wrap). Other modals just consume UP/DOWN to keep card nav locked.
+static bool prv_week_page(int delta) {
+  if (s_type != DETAIL_WEEK || s_state != DM_OPEN) return false;
+  int np = s_week_page + delta;
+  if (np < 0) np = 0;
+  if (np >= WEEK_DAYS) np = WEEK_DAYS - 1;
+  if (np != s_week_page) { s_week_page = np; prv_mark_dirty(); }
+  return true;
+}
+
+bool detail_modal_handle_up(void)   { prv_week_page(-1); return detail_modal_is_active(); }
+bool detail_modal_handle_down(void) { prv_week_page(+1); return detail_modal_is_active(); }
 
 bool detail_modal_handle_select(void) {
   if (s_state != DM_OPEN) return detail_modal_is_active();

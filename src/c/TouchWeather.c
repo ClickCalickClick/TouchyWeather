@@ -152,6 +152,7 @@ static DetailType prv_detail_for_current(void) {
   const char *n = nav_current_name();
   if (strcmp(n, "6 Hours") == 0) return DETAIL_HOURS;
   if (strcmp(n, "Precipitation") == 0) return DETAIL_PRECIP;
+  if (strcmp(n, "Week Ahead") == 0) return DETAIL_WEEK;
   return DETAIL_NONE;
 }
 
