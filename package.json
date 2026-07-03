@@ -20,7 +20,9 @@
     "targetPlatforms": [
       "basalt",
       "chalk",
+      "diorite",
       "emery",
+      "flint",
       "gabbro"
     ],
     "menuIcon": "IMAGE_MENU_ICON",
