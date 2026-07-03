@@ -13,7 +13,17 @@ GFont ui_font_body(void)    { return fonts_get_system_font(FONT_KEY_GOTHIC_24_BO
 GFont ui_font_title(void)   { return fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD); }
 GFont ui_font_label(void)   { return fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD); }
 GFont ui_font_caption(void) { return fonts_get_system_font(FONT_KEY_GOTHIC_14); }
-GFont ui_font_number(void)  { return fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS); }
+GFont ui_font_number(void) {
+  // Hero numerals (temp, UV, AQI). LECO_42 is tuned for the large screens;
+  // on the 144px small-rect class it overflows its box (e.g. the main-card
+  // temp clips to "6..."), so drop to a smaller LECO there. Large classes
+  // keep the verbatim LECO_42 -> emery/gabbro unchanged.
+#if defined(UI_SCREEN_SMALL_RECT)
+  return fonts_get_system_font(FONT_KEY_LECO_36_BOLD_NUMBERS);
+#else
+  return fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS);
+#endif
+}
 
 // --- Layout metric accessors (Phase 3.1 Stage A + Phase 5 screen-class axis) ---
 // Single scaling point for the shared layout constants. Each accessor is now

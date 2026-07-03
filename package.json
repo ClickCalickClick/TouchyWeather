@@ -18,6 +18,7 @@
       "configurable"
     ],
     "targetPlatforms": [
+      "basalt",
       "emery",
       "gabbro"
     ],
