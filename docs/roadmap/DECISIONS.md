@@ -533,3 +533,69 @@ opt-out is explicitly a **later** session (see the Settings-opt-out entry below)
   `detail_modal_open`, so risk is low, but **confirm the up-swipe on real
   emery/gabbro hardware** before release. Reverse: delete the branch + forward
   decl.
+
+### Settings-in-Clay opt-out — DEFERRED to a later session (sequencing decided)
+- **Context:** In the afternoon handoff Jared floated a new feature — Settings
+  fully controllable in Clay, plus an **opt-in to remove the Settings card from
+  the carousel** (touch models keep touch interaction; button models manage
+  everything from Clay). This is *not* the reverted Phase 2.1 long-press-BACK
+  idea (that stays dead — hold-BACK only exits on Pebble hardware, confirmed by
+  Jared); it's a different, additive route.
+- **Scope call:** Out of scope for this session (his stop-point was "Phase 4 +
+  swipe-up"). Left for a future run — noted here so it isn't lost.
+- **Sequencing verdict (Jared, this session):** **card reorder must land in Clay
+  FIRST**, before the Settings card can be opt-out-hidden. Reason: reorder
+  (UP/DOWN-long on the Settings card) is deliberately on-watch only and has no
+  Clay equivalent (Phase 2.2 kept it on-watch — Clay has no drag-reorder). If the
+  Settings card could be hidden today, a user would lose the *only* way to
+  reorder cards. So the future run must:
+  1. Add a card-order control to Clay (a numbered list / per-card order value,
+     since Clay can't drag-reorder) that round-trips to the on-watch traversal —
+     extends the Phase 2.2 `PhoneManagesCards` path.
+  2. *Then* add the opt-in "hide Settings card" toggle (persist key: next free is
+     **208** — 205 `PhoneManagesCards`, 206 `AutoHidePrecip`, 207 reserved for
+     `BigMode`; see 2.2 key map).
+- **Note:** this ties into the existing Phase 2.2 upgrade path (a watch→Clay
+  visibility seed on `showConfiguration`) — doing that seed first would also let
+  the `PhoneManagesCards` master toggle be retired. Worth bundling.
+
+---
+
+## ☀️ AFTERNOON SESSION SUMMARY (2026-07-03) — for Jared's review
+
+Continued on `feature/roadmap-phases`. **3 new commits** on top of the overnight
+8, all screenshot-verified on emery, tree clean, `pebble build` green
+(emery+gabbro), **nothing pushed**.
+
+**Done this session (Phase 4 forecast modals — now 5/5 — + a touch gesture):**
+| Task | What | Verified |
+|---|---|---|
+| 4.3 | Week detail modal (paged-by-day, UP/DOWN page) | ✅ emulator (FRI→SUN, POP, dots, BACK) |
+| 4.4 | UV + AQI modals, **batched** `WeatherData` + cache **107→108** | ✅ emulator; live PKJS data confirmed the fetch round-trip |
+| 4.5 | Swipe-up opens the detail modal on touch models | ⚠️ build-only — no scriptable emulator swipe; **check on hardware** |
+
+**Phase 4 is now complete** (all five forecast cards have a detail modal:
+6 Hours, Precipitation, Week, UV, Air Quality).
+
+**Things to review (⚠️):**
+1. **Cache key bumped 107→108** (4.4). Existing users' weather cache invalidates
+   once on upgrade — they'll see mock/last values until the next refresh. Normal
+   for a struct change, but it's the reason to batch: only one bump for UV+AQI.
+2. **Two paths not runtime-testable in the emulator, verified by build + review
+   only:** (a) the swipe-up gesture (4.5 — no scriptable touch swipe), and (b)
+   the *background/phone* PKJS path in the general case — though the foreground
+   AQI fetch *did* return live data this session, which is a strong signal the JS
+   is correct. Both want a real-hardware pass before release.
+3. **Settings-in-Clay opt-out** was requested but is **deferred** with a decided
+   ordering (reorder-into-Clay first) — see the entry just above.
+
+**Next in the roadmap dependency order** (unchanged from the master report, now
+that Phase 4 is done): **Phase 3.1 Stage A** — the ui-metrics/font accessor
+refactor across all 12 cards — then **Phase 5** (7-platform expansion), then
+**Big Mode (3.1 Stage B)**. Stage A is the heavy shared refactor and the
+recommended next target.
+
+**Before any release** (unchanged): bump version in CHANGELOG.md + package.json,
+add a "What's New" line (also the discoverability hint for the nav/gesture
+changes), do a hardware pass (SELECT/BACK behaviors, swipe-up, background
+refresh), then push/publish. Version deliberately **not** bumped mid-roadmap.
