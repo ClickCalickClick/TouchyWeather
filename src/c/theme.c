@@ -55,21 +55,29 @@ GColor theme_secondary(void) {
   return s_mode == THEME_DARK ? GColorLightGray : GColorDarkGray;
 }
 
+// --- Accent colors (Phase 5: B&W fallback) ---
+// On 1-bit (aplite/diorite/flint) the SDK auto-reduces these accents to
+// GColorWhite, which is INVISIBLE on the light theme's white background
+// (the hi/lo temps, arrows, gauges and chart lines vanished on diorite).
+// Fall the accents back to theme_fg() there instead — always the opposite
+// of the background, so every accented element stays visible. Color
+// differentiation is lost on B&W (all accents read as fg); elements that
+// relied on hue for meaning are already differentiated by shape (up/down
+// arrows, distinct icons, chart markers). Color platforms are unchanged.
 GColor theme_accent_orange(void) {
   // ~#FFAA00 — Pebble's chrome yellow / orange
-  return GColorChromeYellow;
+  return PBL_IF_COLOR_ELSE(GColorChromeYellow, theme_fg());
 }
 
 GColor theme_accent_blue(void) {
   // ~#00AAFF — bright cyan/blue
-  return GColorVividCerulean;
+  return PBL_IF_COLOR_ELSE(GColorVividCerulean, theme_fg());
 }
 
 GColor theme_accent_advice(void) {
   // Purple (GColorVividViolet) — distinct from orange (sunrise/UV/banner)
   // and blue (sunset/precip/AQ). Readable on both dark and light backgrounds.
-  // On 1-bit displays Pebble auto-falls back to white.
-  return GColorVividViolet;
+  return PBL_IF_COLOR_ELSE(GColorVividViolet, theme_fg());
 }
 
 GColor theme_indicator_active(void) { return theme_fg(); }

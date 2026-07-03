@@ -91,12 +91,20 @@ bool ui_draw_status_banner(GContext *ctx, GRect bounds,
                   bounds.origin.y + bounds.size.h - pad_bottom - banner_h,
                   banner_w, banner_h);
 
+#if defined(PBL_BW)
+  // 1-bit: an accent pill collapses to fg (black text on it would vanish)
+  // and a muted pill dithers illegibly. Use a solid inverted pill — fg
+  // background with bg text — so both banner modes stay crisp and readable.
+  GColor pill_bg = theme_fg();
+  GColor txt_color = theme_bg();
+#else
   GColor pill_bg = (mode == STATUS_BANNER_RAIN)
                    ? theme_accent_orange()
                    : theme_muted();
   GColor txt_color = (mode == STATUS_BANNER_RAIN)
                      ? GColorBlack
                      : theme_fg();
+#endif
 
   graphics_context_set_fill_color(ctx, pill_bg);
   graphics_fill_rect(ctx, r, banner_h / 2, GCornersAll);
