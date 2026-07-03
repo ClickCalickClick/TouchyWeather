@@ -2,7 +2,8 @@
 #include "theme.h"
 
 // Persistence keys. Avoid collisions with comm.c PERSIST_KEY_CACHE=101.
-#define KEY_THEME              200
+// (Key 200 retired: theme is now owned solely by theme.c under persist key 1;
+//  theme_init() migrates any legacy key-200 value. See theme.c.)
 #define KEY_LOOP_NAV           201  // bool: wrap card carousel at edges
 #define KEY_BG_UPDATE_INTERVAL 202  // int: background update interval in seconds
 #define KEY_TOGGLE_BASE        210  // KEY_TOGGLE_BASE + ToggleId
@@ -85,10 +86,8 @@ void settings_load(void) {
       }
     }
   }
-  if (persist_exists(KEY_THEME)) {
-    int t = persist_read_int(KEY_THEME);
-    theme_set(t ? THEME_DARK : THEME_LIGHT);
-  }
+  // Theme is loaded by theme_init() (persist key 1), which runs before
+  // settings_load(); no theme handling here anymore.
   for (int i = 0; i < SETTINGS_TOGGLEABLE_COUNT; ++i) {
     if (persist_exists(KEY_TOGGLE_BASE + i)) {
       s_enabled[i] = persist_read_bool(KEY_TOGGLE_BASE + i);
@@ -111,10 +110,6 @@ void settings_load(void) {
       persist_write_int(KEY_BG_UPDATE_INTERVAL, 0);
     }
   }
-}
-
-void settings_save_theme(int theme_mode) {
-  persist_write_int(KEY_THEME, theme_mode);
 }
 
 bool settings_get_loop_nav(void) {

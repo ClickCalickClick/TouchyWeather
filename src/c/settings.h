@@ -35,7 +35,6 @@ typedef enum {
 } ToggleId;
 
 void settings_load(void);
-void settings_save_theme(int theme_mode);
 
 // Card-navigation loop preference. When true (default), pressing UP on the
 // first card or DOWN on the last card wraps around the carousel. When false,
