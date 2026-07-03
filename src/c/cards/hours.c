@@ -2,6 +2,7 @@
 #include "../theme.h"
 #include "../icons.h"
 #include "../ui.h"
+#include "../settings.h"
 #include "../anim.h"
 #include "../weather_data.h"
 #include <stdio.h>
@@ -54,6 +55,71 @@ static bool fmt_precip(const WeatherData *d, int i, char *buf, size_t n) {
 void card_hours_draw(GContext *ctx, GRect bounds) {
   WeatherData *d = weather_data_get();
   int W = bounds.size.w;
+
+  // --- Big Mode (Stage B): 3 bigger rows instead of 6 dense ones. ---
+  // Sample every other hour (0,2,4) so the card still spans the full 6h window
+  // (each row prints its own time, so the 2h pitch is self-evident); each row
+  // is just time + condition icon + temperature, large. The wind and precip
+  // columns and the odd hours all drop — every one of them is still in the
+  // "6 Hours" detail modal (SELECT-hold / swipe up). Header renames to "HOURLY"
+  // so showing 3 of 6 under "6 HOURS" doesn't lie. Returns early -> the Normal
+  // 6-row layout below is untouched and Big-OFF stays pixel-identical.
+  if (settings_get_big_mode()) {
+    static const int idx[3] = {0, 2, 4};
+    GFont row_font = ui_font_body();  // 24B small / 28B large in Big Mode
+    int row_icon, row_h, top_y, hdr_icon;
+#if defined(UI_SCREEN_SMALL_RECT)
+    row_icon = 22; row_h = 28; top_y = UI_HEADER_Y + UI_HEADER_HEIGHT + 4;  hdr_icon = 18;
+#elif defined(UI_SCREEN_SMALL_ROUND)
+    row_icon = 22; row_h = 26; top_y = UI_HEADER_Y + UI_HEADER_HEIGHT + 4;  hdr_icon = 18;
+#elif defined(UI_SCREEN_LARGE_RECT)
+    row_icon = 28; row_h = 42; top_y = UI_HEADER_Y + UI_HEADER_HEIGHT + 18; hdr_icon = 22;
+#else  // UI_SCREEN_LARGE_ROUND
+    row_icon = 28; row_h = 44; top_y = UI_HEADER_Y + UI_HEADER_HEIGHT + 18; hdr_icon = 22;
+#endif
+    ui_draw_card_header_with_icon(ctx, bounds, "HOURLY", theme_fg(),
+                                  UI_HEADER_Y, hdr_icon, icon_draw_clock);
+
+    // Uniform time + temp column widths across the 3 sampled rows, then center
+    // the time | icon | temp cluster (same idiom as the Normal layout).
+    int time_w = 0, temp_w = 0;
+    char tb[12];
+    for (int k = 0; k < 3; ++k) {
+      int i = idx[k];
+      GSize ts = graphics_text_layout_get_content_size(d->hours_label[i], row_font,
+          GRect(0, 0, W, 40), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+      if (ts.w > time_w) time_w = ts.w;
+      snprintf(tb, sizeof(tb), "%d°", d->hours_temp[i]);
+      GSize ps = graphics_text_layout_get_content_size(tb, row_font,
+          GRect(0, 0, W, 40), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+      if (ps.w > temp_w) temp_w = ps.w;
+    }
+    int gap = 10;
+    int cluster_w = time_w + gap + row_icon + gap + temp_w;
+    int cluster_x = bounds.origin.x + (W - cluster_w) / 2;
+    int floor_x = bounds.origin.x + UI_MARGIN_X;
+    if (cluster_x < floor_x) cluster_x = floor_x;
+    int th = row_h - 2;
+    for (int k = 0; k < 3; ++k) {
+      int i = idx[k];
+      int row_y = top_y + k * row_h;
+      int icon_cx = cluster_x + time_w + gap + row_icon / 2;
+      int icon_cy = row_y + th / 2 - 2;
+      graphics_context_set_text_color(ctx, theme_fg());
+      graphics_draw_text(ctx, d->hours_label[i], row_font,
+          GRect(cluster_x, row_y, time_w + 4, th),
+          GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+      icon_draw_condition(ctx, GPoint(icon_cx, icon_cy), row_icon, d->hours_cond[i]);
+      snprintf(tb, sizeof(tb), "%d°", d->hours_temp[i]);
+      int temp_x = cluster_x + time_w + gap + row_icon + gap;
+      graphics_draw_text(ctx, tb, row_font,
+          GRect(temp_x, row_y, temp_w + 4, th),
+          GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+    }
+    ui_draw_auto_banner(ctx, bounds, d->rain_alert_min, d->last_updated,
+                        anim_get_frame());
+    return;
+  }
 
   ui_draw_card_header_with_icon(ctx, bounds, "6 HOURS",
                                 theme_fg(),
