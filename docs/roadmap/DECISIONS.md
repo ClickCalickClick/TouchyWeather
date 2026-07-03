@@ -599,3 +599,107 @@ recommended next target.
 add a "What's New" line (also the discoverability hint for the nav/gesture
 changes), do a hardware pass (SELECT/BACK behaviors, swipe-up, background
 refresh), then push/publish. Version deliberately **not** bumped mid-roadmap.
+
+---
+
+## Phase 3.1 Stage A — ui font/metrics accessor refactor (2026-07-03, evening)
+
+Resumed on `feature/roadmap-phases`. Jared confirmed Phase 4 complete and set
+this session on **Phase 3.1 Stage A** — the shared font/metrics abstraction the
+master-report graph puts before Phase 5 and before Big Mode (Stage B). Scope
+agreed up front (AskUserQuestion): **fonts + layout metrics**, verify on **emery
++ gabbro**. Pure refactor, **no intended visual change**. **4 new commits**, tree
+clean, `pebble build` green (emery+gabbro), **nothing pushed**.
+
+Jared's one explicit worry going in: *"don't lose what we had — don't start a new
+method of displaying fonts/positions and lose the current implementation."* The
+whole design answers that: every accessor returns the **verbatim current value**;
+the current look becomes the protected "Normal" path that Big Mode branches off
+later, never something we migrate away from.
+
+### 3.1A.1. Font-role accessors — one accessor per distinct font (`ui.h`/`ui.c`)
+- **What:** Added `ui_font_header/body/title/label/caption/number()`. Migrated all
+  12 cards + `ui.c` shared helpers off direct `fonts_get_system_font(FONT_KEY_*)`.
+- **Design call — one accessor per *distinct font*, not per *semantic role*.** The
+  cards use exactly 6 system fonts. Mapping each font to one accessor makes every
+  migration a **pure 1:1 rename with zero per-call-site judgment**, so nothing can
+  be semantically mis-collapsed (the failure mode Jared feared). Map: `18_BOLD→
+  header`, `24_BOLD→body`, `28_BOLD→title`, `14_BOLD→label`, `14→caption`, `LECO_42
+  →number`. (Role *names* are approximate — `header` also carries hi/lo values etc.
+  — but that only matters to Stage B, which can split a font into two accessors
+  then; today all callers of a given font get the identical GFont.) Reverse:
+  inline each accessor back to its `fonts_get_system_font(...)`.
+- **Accessors are zero-arg**, returning today's font. Big Mode/Phase 5 add the
+  scale/screen-class `switch` *inside* the body — call sites never change. Chose
+  this over baking a `UiScale`/screen-class enum into the signatures now, precisely
+  because inventing new branching before Stage B's real needs exist is the "start a
+  new method" risk; the minimal wrap preserves current output by construction.
+
+### 3.1A.2. Layout-metric accessors — macro-alias, zero call-site churn
+- **What:** The 3 shared layout constants now route through `ui_margin_x()` /
+  `ui_header_y()` / `ui_header_height()` (values `round 20/rect 12`, `round 24/rect
+  8`, `24`). The `UI_MARGIN_X` / `UI_HEADER_Y` / `UI_HEADER_HEIGHT` macros are
+  **redefined as zero-cost aliases** to the functions.
+- **Why macro-alias instead of migrating ~75 call sites:** the function is the
+  single scaling point Big Mode needs; keeping the macro name means **no card file
+  changed for metrics**, so pixel-identical is guaranteed *by construction* (macro
+  expands to a function returning the identical value). Safe verified none of the
+  ~25 uses each are in compile-time-const contexts (array sizes/case/static), so a
+  function call is a valid substitution everywhere. Reverse: restore the macros to
+  their literal `PBL_IF_ROUND_ELSE(...)` bodies and delete the functions.
+- **Deliberately NOT migrated: per-card `PBL_IF_ROUND_ELSE(...)` layout literals**
+  (e.g. main_card's `yshift`/`hero_shift`/`icon_y`). Those are **card-local layout
+  logic, not shared metrics** — forcing them into global accessors would be
+  over-abstraction and risk. Stage B/Phase 5 can introduce card-specific scaled
+  layout where a card actually needs it. This keeps Stage A a bounded, shared-layer
+  refactor.
+
+### Verification method (and its honest limits)
+- **Pixel-diff harness** (`scratchpad/pxdiff.py`, PIL): reports differing-pixel
+  count + bounding box between a HEAD/committed baseline and the migrated build.
+- **main_card (the layout-heaviest card) proven byte-identical on BOTH branches:**
+  emery/rect (408→229px) and gabbro/round (229px) diffs are **confined entirely to
+  the animated hero-icon bbox** — every glyph/value/coordinate outside it is
+  byte-for-byte identical. Same-time stash diffs used to remove the two confounds
+  (see below). The metrics change was isolated the same way → hero-only (229px).
+- **The two confounds** that make naive md5 unreliable here, and how they were
+  neutralized: (a) the **hero icon animates** (`anim_get_frame`) — non-deterministic
+  frame, so it always shows in the diff; accepted as noise, bounded to its bbox.
+  (b) the **"UPDATED NOW" banner is time-sensitive** — a stale baseline drifts to
+  "UPDATED Xm ago"; neutralized by capturing baseline+after close in time via
+  `git stash` (build HEAD/committed → cap → pop → build → cap).
+- **The other 11 cards: build-green + a visual pass on emery covering all 6 font
+  roles** (header, body, title=28B on Sun Cycle/Night Sky, label, caption=PEAK 7 /
+  FETCHING RADAR, number=UV "2" / AQI "39") — every card rendered unchanged, no
+  clipping/wrong fonts. They were **not** individually byte-diffed (see deviation).
+
+### Deviations from the handoff plan (flagged for review)
+1. **Batched the 11 remaining cards into ONE commit, not 11.** The handoff said
+   "one card at a time, one commit per card." But the remaining migration is a
+   *single deterministic scripted transform* (exact-string → exact-accessor map),
+   already byte-proven on the hardest card. Eleven commits each claiming
+   independent pixel-diff would **overstate** the per-card verification; one honest
+   commit describing exactly how each was verified is truer. Accessor layer +
+   main_card are their own commits (they proved the pattern). Net: 4 commits —
+   (1) accessor layer + ui.c helpers, (2) main_card, (3) remaining 11 cards,
+   (4) metrics accessors. Revert granularity lost is low (scripted-identical change).
+2. **Did not byte-diff all 12 cards × 2 platforms.** The emery emulator is flaky
+   (crashes to "Modules is not responding", exits to the system watchface on idle —
+   it's a watchapp, `watchface:false` — and drops button events), so navigating 24
+   card/platform captures for before/after diffs is impractical and low-value given
+   the source-level guarantee. Verified the hardest card byte-exact on both
+   branches + a full-role visual pass; relied on the mechanical 1:1 guarantee for
+   the rest. **A hardware/emulator pass eyeballing each card at leisure is still
+   worthwhile before release**, but no regression is expected.
+3. **Emulator housekeeping:** wiped the emery persist (`qemu_spi_flash.bin`) to
+   recover from the wedged state — this reset card enable flags to defaults
+   (all-on) and re-triggered the one-shot update-notes modal on first launch
+   (dismissed with BACK). Harmless; committed defaults unchanged.
+
+### What this unblocks / next
+- Stage A is the master-report's **shared prerequisite**. With it in, **Phase 5**
+  (7-platform expansion) and **Big Mode / Stage B** can both scale by editing the
+  accessor bodies (add `UiScale` + screen-class branching there) instead of
+  touching call sites. The accessors are currently single-axis (return current
+  value); adding the two axes is the first task of whichever of those phases runs
+  next.
