@@ -60,8 +60,8 @@ void card_hours_draw(GContext *ctx, GRect bounds) {
                                 UI_HEADER_Y, 18, icon_draw_clock);
 
   // Tighter row font so 6 rows fit without crowding the page indicator.
-  GFont row_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
-  GFont pop_font = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
+  GFont row_font = ui_font_header();
+  GFont pop_font = ui_font_label();
   int icon_size = 16;
   // Gaps are tighter on rect so wind + precip both fit in 176px usable.
   int gap = PBL_IF_ROUND_ELSE(5, 4);

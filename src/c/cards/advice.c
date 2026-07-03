@@ -580,7 +580,7 @@ static const char *const *prv_phrase_pool_for_tier(const WeatherData *d,
 }
 
 static void prv_audit_phrases(GRect body_r) {
-  GFont f = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
+  GFont f = ui_font_body();
   for (int t = 0; t < ADV_TIER_COUNT; ++t) {
     const AdviceTierDef *def = &TIERS[t];
     for (int i = 0; i < def->phrase_count; ++i) {
@@ -818,7 +818,7 @@ void card_advice_draw(GContext *ctx, GRect bounds) {
 
   // Tier badge (icon + tier name) — small, right under the header.
   int badge_y = header_y + UI_HEADER_HEIGHT + PBL_IF_ROUND_ELSE(8, 4);
-  GFont badge_font = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
+  GFont badge_font = ui_font_label();
   GSize bsize = graphics_text_layout_get_content_size(def->label, badge_font,
       GRect(0, 0, W, 20), GTextOverflowModeTrailingEllipsis,
       GTextAlignmentLeft);
@@ -869,7 +869,7 @@ void card_advice_draw(GContext *ctx, GRect bounds) {
   prv_generate_tier_headline(tier, d, headline_buf, sizeof(headline_buf));
   graphics_context_set_text_color(ctx, accent);
   graphics_draw_text(ctx, headline_buf,
-      fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+      ui_font_header(),
       headline_r, GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
 
   // --- Quip row (fg color, Gothic 24 Bold) ---
@@ -880,7 +880,7 @@ void card_advice_draw(GContext *ctx, GRect bounds) {
   if (!s_audited) { prv_audit_phrases(quip_r); s_audited = true; }
   graphics_context_set_text_color(ctx, theme_fg());
   graphics_draw_text(ctx, phrase,
-      fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+      ui_font_body(),
       quip_r, GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
 
   // Standard auto status banner so this card stays consistent with peers.

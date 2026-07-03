@@ -18,7 +18,7 @@ void card_precipitation_draw(GContext *ctx, GRect bounds) {
   // Header icon + label.
   int header_y = UI_HEADER_Y;
   const char *label = "PRECIPITATION";
-  GFont hf = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  GFont hf = ui_font_header();
   GSize tsize = graphics_text_layout_get_content_size(label, hf,
       GRect(0,0,W,UI_HEADER_HEIGHT), GTextOverflowModeTrailingEllipsis,
       GTextAlignmentLeft);
@@ -49,8 +49,8 @@ void card_precipitation_draw(GContext *ctx, GRect bounds) {
   int bar_x0 = ox + (W - total_bars_w) / 2;
 
   const char *labels[5] = { "Now", "+1h", "+2h", "+3h", "+4h" };
-  GFont label_font = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
-  GFont pct_font = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
+  GFont label_font = ui_font_label();
+  GFont pct_font = ui_font_label();
 
   for (int i = 0; i < n; ++i) {
     int pct = d->precip[i];

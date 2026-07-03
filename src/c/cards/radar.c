@@ -177,8 +177,8 @@ void card_radar_draw(GContext *ctx, GRect bounds) {
     prv_request_if_needed();
   }
 
-  GFont body = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
-  GFont small = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
+  GFont body = ui_font_header();
+  GFont small = ui_font_label();
 
   if (s_state == RADAR_READY && s_bitmap) {
     // Center the bitmap in the card area below header / above footer.
@@ -201,7 +201,7 @@ void card_radar_draw(GContext *ctx, GRect bounds) {
     // Footer attribution required by RainViewer TOS. Anchored relative to
     // card bottom so it clears the card indicator on both rect and round.
     // Round needs more clearance due to the larger bottom bezel.
-    GFont tiny = fonts_get_system_font(FONT_KEY_GOTHIC_14);
+    GFont tiny = ui_font_caption();
     int foot_y = H - PBL_IF_ROUND_ELSE(51, 35);
     prv_draw_centered_text(ctx, bounds, "RAINVIEWER",
                            tiny, theme_secondary(), foot_y);

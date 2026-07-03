@@ -37,7 +37,7 @@ void card_sun_cycle_draw(GContext *ctx, GRect bounds) {
   int row_h = 56;
   int top_row_y = header_y + UI_HEADER_HEIGHT + PBL_IF_ROUND_ELSE(20, 14);
   int bot_row_y = top_row_y + row_h;
-  GFont time_font = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
+  GFont time_font = ui_font_title();
 
   // --- Sunrise row ---
   GSize sr_size = graphics_text_layout_get_content_size(d->sunrise, time_font,

@@ -54,7 +54,7 @@ void card_night_sky_draw(GContext *ctx, GRect bounds) {
   int name1_y = moon_y + moon_size/2 + PBL_IF_ROUND_ELSE(10, 8);
   graphics_context_set_text_color(ctx, theme_fg());
   graphics_draw_text(ctx, d->moon_name1,
-      fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
+      ui_font_title(),
       GRect(bounds.origin.x, name1_y, W, 32),
       GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
 
@@ -62,7 +62,7 @@ void card_night_sky_draw(GContext *ctx, GRect bounds) {
   int name2_y = name1_y + 28;
   graphics_context_set_text_color(ctx, theme_secondary());
   graphics_draw_text(ctx, d->moon_name2,
-      fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+      ui_font_header(),
       GRect(bounds.origin.x, name2_y, W, 22),
       GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
 
@@ -72,7 +72,7 @@ void card_night_sky_draw(GContext *ctx, GRect bounds) {
   int illum_y = name2_y + 22;
   graphics_context_set_text_color(ctx, theme_secondary());
   graphics_draw_text(ctx, illum_buf,
-      fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
+      ui_font_label(),
       GRect(bounds.origin.x, illum_y, W, 18),
       GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
 

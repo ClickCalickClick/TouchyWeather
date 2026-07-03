@@ -43,8 +43,8 @@ void card_week_draw(GContext *ctx, GRect bounds) {
                                 theme_fg(),
                                 UI_HEADER_Y, 18, icon_draw_calendar);
 
-  GFont row_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
-  GFont pop_font = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
+  GFont row_font = ui_font_header();
+  GFont pop_font = ui_font_label();
   int icon_size = 16;
   int gap = 6;
   int row_h = PBL_IF_ROUND_ELSE(28, 26);

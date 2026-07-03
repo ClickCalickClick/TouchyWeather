@@ -59,8 +59,8 @@ void card_golden_hour_draw(GContext *ctx, GRect bounds) {
   // Uniform column widths: measure max kind-label and max time-string
   // so all four rows align cleanly regardless of "AM"/"PM" character
   // count.
-  GFont label_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
-  GFont time_font  = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  GFont label_font = ui_font_header();
+  GFont time_font  = ui_font_header();
 
   const char *kinds[4] = { rows[0].kind, rows[1].kind, rows[2].kind, rows[3].kind };
   const char *times[4] = { rows[0].time_str, rows[1].time_str, rows[2].time_str, rows[3].time_str };

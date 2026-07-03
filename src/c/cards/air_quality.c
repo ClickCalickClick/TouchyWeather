@@ -83,14 +83,14 @@ void card_air_quality_draw(GContext *ctx, GRect bounds) {
   char buf[8]; snprintf(buf, sizeof(buf), "%d", d->aqi);
   graphics_context_set_text_color(ctx, cat);
   graphics_draw_text(ctx, buf,
-      fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS),
+      ui_font_number(),
       GRect(c.x - radius, c.y - 32, radius*2, 50),
       GTextOverflowModeFill, GTextAlignmentCenter, NULL);
 
   // Label below — also colored by category.
   graphics_context_set_text_color(ctx, cat);
   graphics_draw_text(ctx, aqi_label(d->aqi),
-      fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+      ui_font_header(),
       GRect(ox, c.y + 18, W, 24),
       GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
 
@@ -108,7 +108,7 @@ void card_air_quality_draw(GContext *ctx, GRect bounds) {
     else               { plabel = "POLLEN: VERY HIGH";    pcolor = GColorRed; }
     graphics_context_set_text_color(ctx, pcolor);
     graphics_draw_text(ctx, plabel,
-        fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+        ui_font_header(),
         GRect(ox, c.y + 40, W, 24),
         GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
   }

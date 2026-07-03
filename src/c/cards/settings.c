@@ -42,7 +42,7 @@ void card_settings_draw(GContext *ctx, GRect bounds) {
       PBL_IF_ROUND_ELSE("MANAGE CARDS", "CARDS"),
       theme_fg(), UI_HEADER_Y, 18, icon_draw_settings_gear);
 
-  GFont row_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  GFont row_font = ui_font_header();
   // Round screens need 11 rows + header + footer to coexist with the
   // page indicator at y=224. Tighter row pitch keeps RADAR clear of
   // the rotating hint.
@@ -118,7 +118,7 @@ void card_settings_draw(GContext *ctx, GRect bounds) {
     const int hint_count = (int)(sizeof(hints) / sizeof(hints[0]));
     // ~2.5s per hint (25 frames @ 100ms tick).
     int phase = (int)((anim_get_frame() / 25) % (uint32_t)hint_count);
-    GFont hint_font = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
+    GFont hint_font = ui_font_label();
     int hint_y = PBL_IF_ROUND_ELSE(H - 58, H - 32);
     graphics_context_set_text_color(ctx, theme_secondary());
     graphics_draw_text(ctx, hints[phase], hint_font,

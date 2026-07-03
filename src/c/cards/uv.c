@@ -44,13 +44,13 @@ void card_uv_draw(GContext *ctx, GRect bounds) {
   char buf[8]; snprintf(buf, sizeof(buf), "%d", d->uv);
   graphics_context_set_text_color(ctx, theme_fg());
   graphics_draw_text(ctx, buf,
-      fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS),
+      ui_font_number(),
       GRect(c.x - radius, c.y - 32, radius*2, 50),
       GTextOverflowModeFill, GTextAlignmentCenter, NULL);
 
   // Label below.
   graphics_draw_text(ctx, uv_label(d->uv),
-      fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+      ui_font_header(),
       GRect(ox, c.y + 18, W, 24),
       GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
 
@@ -62,7 +62,7 @@ void card_uv_draw(GContext *ctx, GRect bounds) {
     snprintf(peak_buf, sizeof(peak_buf), "PEAK %d", d->uv_max);
     graphics_context_set_text_color(ctx, theme_secondary());
     graphics_draw_text(ctx, peak_buf,
-        fonts_get_system_font(FONT_KEY_GOTHIC_14),
+        ui_font_caption(),
         GRect(ox, c.y + 38, W, 18),
         GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
   }
