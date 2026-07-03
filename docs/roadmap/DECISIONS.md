@@ -847,3 +847,75 @@ aplite: **not shipped** (24KB App RAM < ~51KB binary — unchanged from the doc)
   screen-class); Stage B is the third axis in the same place.
 - Or, the **5.2 per-card polish sweep** (small-rect + small-round value tuning,
   card by card, screenshot matrix) if a tighter look is wanted before Big Mode.
+
+## Phase 5.2 — Per-card layout sweep for the two small classes (2026-07-03, later)
+
+Resumed on `feature/roadmap-phases`; Jared picked the **5.2 polish sweep** over
+Big Mode (finish Phase 5, low-risk, de-risks the hardware review). **8 commits**,
+tree clean, `pebble build` green for all 6, **nothing pushed**. Same overriding
+constraint as Phase 5: **emery + gabbro stay byte-identical** — re-verified after
+*every* commit with `cmp -l /tmp/ref-<p>.bin build/<p>/pebble-app.bin | awk '$1>168'`
+== 0 (references snapshotted from the pre-5.2 HEAD build).
+
+### Root cause the sweep addressed
+The Phase 5 Stage-A scaffolding routed only the **shared** metrics (margin_x,
+header_y, hero font, banner pad) through the screen-class axis. Every card's
+**own** vertical layout still used `PBL_IF_ROUND_ELSE(round, rect)`, so the two
+new small classes inherited the wrong sibling's absolutes: **chalk (small-round
+180×180) got gabbro-260 values**, **basalt/diorite/flint (small-rect 144×168) got
+emery-200 values**. On the shorter screens the fixed-from-top content and the
+fixed-from-bottom status banner collided — content bled *under* the banner on
+many cards. Fix pattern per card: give the two small classes their own
+compressed anchors / smaller fonts / smaller gauge radius; keep the large
+branches verbatim so emery/gabbro don't move.
+
+### Commits (each verified on basalt + chalk, spot-checked on diorite B&W)
+1. **nav page indicator (chalk).** `indicator_y` was a hardcoded `229` on every
+   round display — a gabbro-260 absolute that falls *off* the 180px chalk screen
+   (dots invisible). small-round now anchors `rb.size.h - 14` like rect.
+2. **main card hero block.** icon→temp/hi-lo→FEELS positioned from the top, wind
+   row from the bottom; on the small classes they collided (wind glyph rode into
+   "FEELS"). New compressed anchors per small class; kept `temp_h ~44` so FEELS
+   still clears the hi/lo column (low sits at `temp_y+46`). **Gotcha:** moving the
+   `temp_drop` computation earlier changed gabbro's codegen by 12 bytes (it's a
+   runtime value there; emery folds it to a constant) — kept it at its original
+   post-`block_shift` position to stay byte-identical.
+3. **6 Hours** — 6 rows in the 18px header font overflowed the banner; small
+   classes use the 14px label font, `row_h 15`, tighter top offset.
+4. **Week Ahead** — same, 5 day-rows, 14px label font + `row_h 16` (the existing
+   top-clamp then floors the block).
+5. **Sun Cycle** — 40px icon / 56px row pitch pushed the sunset under the banner;
+   small classes use icon 36 / pitch 42.
+6. **UV** + 7. **Air Quality** — the half-arc gauge used the gabbro-260 radius
+   (72) on chalk; shrunk to 42/44, lifted the value box, tightened the
+   label/PEAK (UV) and label/pollen (AQI) offsets; AQI pollen badge drops to the
+   caption font on small.
+8. **Night Sky** — 56/58px moon + title-font phase name buried the name words +
+   "% LIT"; small classes use moon 40, header/label name fonts, tighter offsets.
+
+### Codegen gotcha worth remembering (byte-identical discipline)
+Adding **int** locals for the large branch is safe (they fold to the same
+constants — emery/gabbro stayed 0). Introducing a **GFont variable** for the
+large branch is *not* — storing the font pointer instead of calling
+`ui_font_*()` inline at the draw site shifted both binaries (AQI, first attempt).
+Rule: on the large/verbatim path, select fonts **inline via `#if`**, never via a
+hoisted variable.
+
+### Still open (not blockers)
+1. **UV-value tofu** on unknown/negative UV — still reproduces (a solid block in
+   the gauge); pre-existing, unrelated to layout, deferred. A clamp/"—" fix is a
+   clean separate task (LECO lacks the minus glyph).
+2. **update_notes window clips on chalk** (small-round) — the changelog splash
+   truncates a line ("…ens working"); transient, shown once per version, not
+   touched this sweep.
+3. **Inert "RADAR" row in Settings** on carved-out platforms — still there
+   (Phase 5 known item; needs the shared cursor/reorder change).
+4. basalt Week precip `%` sits tight against the right edge on 144px — legible,
+   left as-is.
+
+### Next
+- **Big Mode (Stage B)** — the last big roadmap item; add the Normal/Big **scale
+  axis** inside the same accessor bodies that now carry the screen-class axis.
+- The three small deferred fixes above (UV tofu clamp, chalk update_notes clip,
+  Settings RADAR row) are each a tidy standalone commit if a finishing pass is
+  wanted first.
