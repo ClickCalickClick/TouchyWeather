@@ -32,10 +32,23 @@ void card_sun_cycle_draw(GContext *ctx, GRect bounds) {
   // time on the right of each row. To equalize edge whitespace, we
   // measure each time text and treat (icon + gap + time) as a single
   // cluster, centered horizontally in the card.
+  // Small classes (144x168 / 180x180): the 40px icon + 56px row pitch pushed
+  // the sunset row under the bottom banner. Shrink the icon and row pitch and
+  // tighten the top offset so both rows clear the banner (Phase 5.2). Large
+  // classes keep verbatim values -> emery/gabbro byte-identical.
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  int icon_size = 36;
+#else
   int icon_size = 40;
+#endif
   int gap = 10;
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  int row_h = 42;
+  int top_row_y = header_y + UI_HEADER_HEIGHT + 6;
+#else
   int row_h = 56;
   int top_row_y = header_y + UI_HEADER_HEIGHT + PBL_IF_ROUND_ELSE(20, 14);
+#endif
   int bot_row_y = top_row_y + row_h;
   GFont time_font = ui_font_title();
 
