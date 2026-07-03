@@ -1,6 +1,37 @@
 #pragma once
 #include <pebble.h>
 
+// --- Screen-class axis (Phase 5) ---
+//
+// The second axis the Stage A accessors branch on (scale/Big Mode is the
+// third, added later). Determined ENTIRELY at compile time from the SDK's
+// own per-platform defines (PBL_ROUND + PBL_DISPLAY_WIDTH), so it costs
+// nothing at runtime and matches the existing PBL_IF_ROUND_ELSE idiom.
+//
+// Four classes, per the master report:
+//   UI_SCREEN_SMALL_RECT   144x168  aplite / basalt / diorite / flint
+//   UI_SCREEN_SMALL_ROUND  180x180  chalk            (genuinely new class)
+//   UI_SCREEN_LARGE_RECT   200x228  emery            (the old "rect" values)
+//   UI_SCREEN_LARGE_ROUND  260x260  gabbro           (the old "round" values)
+//
+// Exactly one of these is defined per build. emery keeps LARGE_RECT and
+// gabbro keeps LARGE_ROUND, so as long as those two branches reproduce the
+// pre-Phase-5 PBL_IF_ROUND_ELSE values, emery+gabbro stay pixel-identical
+// by construction — only the two NEW small classes get new values.
+#if defined(PBL_ROUND)
+#  if PBL_DISPLAY_WIDTH <= 200   // chalk 180 (large-round gabbro is 260)
+#    define UI_SCREEN_SMALL_ROUND 1
+#  else
+#    define UI_SCREEN_LARGE_ROUND 1
+#  endif
+#else
+#  if PBL_DISPLAY_WIDTH <= 144   // aplite/basalt/diorite/flint
+#    define UI_SCREEN_SMALL_RECT 1
+#  else                          // emery 200
+#    define UI_SCREEN_LARGE_RECT 1
+#  endif
+#endif
+
 // --- Layout metric accessors (Phase 3.1 Stage A) ---
 //
 // The shared layout constants below now route through accessor functions

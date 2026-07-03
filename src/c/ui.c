@@ -15,13 +15,36 @@ GFont ui_font_label(void)   { return fonts_get_system_font(FONT_KEY_GOTHIC_14_BO
 GFont ui_font_caption(void) { return fonts_get_system_font(FONT_KEY_GOTHIC_14); }
 GFont ui_font_number(void)  { return fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS); }
 
-// --- Layout metric accessors (Phase 3.1 Stage A) ---
-// Single scaling point for the shared layout constants. Values are the
-// verbatim pre-refactor macro values; Big Mode / Phase 5 will branch here
-// on scale + screen class. The UI_* macros in ui.h alias these.
-int ui_margin_x(void)      { return PBL_IF_ROUND_ELSE(20, 12); }
-int ui_header_y(void)      { return PBL_IF_ROUND_ELSE(24, 8); }
-int ui_header_height(void) { return 24; }
+// --- Layout metric accessors (Phase 3.1 Stage A + Phase 5 screen-class axis) ---
+// Single scaling point for the shared layout constants. Each accessor is now
+// a 4-way table over the compile-time screen class (see ui.h). The two LARGE
+// branches return the verbatim pre-Phase-5 PBL_IF_ROUND_ELSE values, so emery
+// (large-rect) and gabbro (large-round) are pixel-identical by construction.
+// The two SMALL classes start equal to their large sibling and are tuned per
+// platform with screenshot evidence (Phase 5.2) — never up front (prove first).
+int ui_margin_x(void) {
+#if defined(UI_SCREEN_SMALL_ROUND)
+  return 20;   // chalk 180  — TODO(5.2): tune; currently == large-round
+#elif defined(UI_SCREEN_LARGE_ROUND)
+  return 20;   // gabbro 260 — verbatim pre-Phase-5 round value
+#elif defined(UI_SCREEN_SMALL_RECT)
+  return 12;   // 144x168    — TODO(5.2): tune; currently == large-rect
+#else
+  return 12;   // emery 200  — verbatim pre-Phase-5 rect value
+#endif
+}
+int ui_header_y(void) {
+#if defined(UI_SCREEN_SMALL_ROUND)
+  return 24;   // chalk 180  — TODO(5.2): tune; currently == large-round
+#elif defined(UI_SCREEN_LARGE_ROUND)
+  return 24;   // gabbro 260 — verbatim pre-Phase-5 round value
+#elif defined(UI_SCREEN_SMALL_RECT)
+  return 8;    // 144x168    — TODO(5.2): tune; currently == large-rect
+#else
+  return 8;    // emery 200  — verbatim pre-Phase-5 rect value
+#endif
+}
+int ui_header_height(void) { return 24; }  // uniform across all screen classes
 
 static void prv_format_ago(uint32_t when, char *out, size_t n) {
   if (!when) { snprintf(out, n, "UPDATED --"); return; }
