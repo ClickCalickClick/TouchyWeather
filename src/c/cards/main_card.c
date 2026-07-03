@@ -25,24 +25,57 @@ void card_main_draw(GContext *ctx, GRect bounds) {
   //   top_shift  — weather icon: hero_shift + 9px on round.
   //   loc_shift  — location label: top_shift + 2px on round (a touch lower
   //                than the icon).
+  // The shift tiers below (yshift/hero_shift/top_shift/loc_shift) and the
+  // large icon/temp box are keyed off the taller emery/gabbro screens. On the
+  // two small classes those absolutes leave the fixed-from-top hero block
+  // (icon → temp/hi-lo → FEELS) and the fixed-from-bottom wind row colliding in
+  // the middle — the wind glyph rode up into "FEELS" (Phase 5.2). Give the
+  // small classes their own compressed anchors: a smaller icon/temp box and a
+  // higher wind row. The no-location re-centering below (block_shift) then
+  // vertically centers the hero block above the wind row.
+  //
+  // Layout anchors for the hero block and the wind/humidity row. When the
+  // location label is hidden (Clay "Show location" OFF, the default) the hero
+  // block re-centers vertically between the top of the screen and the wind row,
+  // so the card isn't top-heavy with the location gone. The wind row, pill and
+  // page indicator stay put — nothing below moves and no other card is affected.
+  // When location is ON, block_shift is 0 and the layout matches the
+  // location-enabled design. Large-rect (emery) / large-round (gabbro) keep the
+  // verbatim pre-Phase-5 expressions → both stay pixel-identical.
+#if defined(UI_SCREEN_SMALL_RECT)
+  // 144x168. temp_h must stay ~44 so FEELS clears the hi/lo column (its low
+  // value sits at temp_y+46); a smaller box rides FEELS up into "50°". row_y
+  // 86 puts the wind row just below FEELS and just above the banner (top ~126).
+  int icon_size = 28;
+  int temp_h = 44;
+  int feels_lift = 0;
+  int icon_y = 2;
+  int temp_y = 8;
+  int row_y = 86;
+  int loc_shift = 0;
+#elif defined(UI_SCREEN_SMALL_ROUND)
+  // 180x180. Same temp_h clearance rule; a touch more vertical room than
+  // small-rect, so the block sits lower and the wind row at 100 clears the
+  // small-round banner (top ~140).
+  int icon_size = 38;
+  int temp_h = 46;
+  int feels_lift = 0;
+  int icon_y = 8;
+  int temp_y = 16;
+  int row_y = 100;
+  int loc_shift = 0;
+#else
   int yshift = PBL_IF_ROUND_ELSE(5, 2);
   int hero_shift = yshift + PBL_IF_ROUND_ELSE(3, 0);
   int top_shift = hero_shift + PBL_IF_ROUND_ELSE(9, 0);
   int loc_shift = top_shift + PBL_IF_ROUND_ELSE(2, 0);
-
-  // Layout anchors for the hero block (icon → temp/hi-lo → FEELS) and the
-  // wind/humidity row. When the location label is hidden (Clay "Show location"
-  // OFF, the default) the hero block re-centers vertically between the top of
-  // the screen and the wind row, so the card isn't top-heavy with the location
-  // gone. The wind row, pill and page indicator stay put — nothing below moves
-  // and no other card is affected. When location is ON, block_shift is 0 and
-  // the layout is identical to the location-enabled design.
   int icon_size = 48;
   int temp_h = 50;
   int feels_lift = PBL_IF_ROUND_ELSE(0, 3);
   int icon_y = PBL_IF_ROUND_ELSE(32, 26) + top_shift;
   int temp_y = PBL_IF_ROUND_ELSE(60, 60) + hero_shift;
   int row_y  = PBL_IF_ROUND_ELSE(H - 104, H - 84) + yshift;
+#endif
   int block_top = icon_y;
   int block_bottom = temp_y + temp_h - feels_lift + 30; // FEELS box bottom
   int block_h = block_bottom - block_top;
@@ -50,11 +83,17 @@ void card_main_draw(GContext *ctx, GRect bounds) {
                     : (((row_y - block_h) / 2) - block_top);
   icon_y += block_shift;
   temp_y += block_shift;
-  // Gabbro, no-location mode only: drop the temp / hi-lo / FEELS cluster 8px
-  // below the centered icon for a more balanced split. Icon stays put; the
-  // location-on look and Emery are unchanged. hi-lo and FEELS derive from
-  // temp_y, so they follow.
+  // Gabbro (large-round), no-location mode only: drop the temp / hi-lo / FEELS
+  // cluster 8px below the centered icon for a more balanced split. Icon stays
+  // put; the location-on look and Emery are unchanged. hi-lo and FEELS derive
+  // from temp_y, so they follow. The small classes use their own compressed
+  // anchors above and don't want this gabbro-tuned drop. Kept at this position
+  // (after block_shift) so gabbro's codegen is byte-for-byte unchanged.
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  int temp_drop = 0;
+#else
   int temp_drop = PBL_IF_ROUND_ELSE(d->show_location ? 0 : 8, 0);
+#endif
   temp_y += temp_drop;
 
   // Location name header, centered at the very top. Reads as a quiet label
