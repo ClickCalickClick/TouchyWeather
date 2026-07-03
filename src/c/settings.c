@@ -9,6 +9,7 @@
 #define KEY_ANIMATIONS_ENABLED 203  // bool: decorative animation master switch
 #define KEY_SELECT_TOGGLES_THEME 204 // bool: SELECT flips theme on ordinary cards
 #define KEY_PHONE_MANAGES_CARDS 205  // bool: Clay controls per-card visibility
+#define KEY_AUTO_HIDE_PRECIP   206  // bool: auto-hide precip/radar when dry
 #define KEY_TOGGLE_BASE        210  // KEY_TOGGLE_BASE + ToggleId
 #define KEY_CARD_ORDER         220  // SETTINGS_TOGGLEABLE_COUNT bytes
 
@@ -25,6 +26,12 @@ static bool s_select_toggles_theme = true;
 // Opt-in: phone (Clay) controls per-card visibility. Default off so on-watch
 // card management is the norm and a Clay save can't silently wipe it.
 static bool s_phone_manages_cards = false;
+
+// Opt-in (Phase 3.2): auto-hide precip/radar when dry. Default off.
+static bool s_auto_hide_precip = false;
+
+// Runtime auto-hidden flags (not persisted). Only precip/radar are ever set.
+static bool s_auto_hidden[SETTINGS_TOGGLEABLE_COUNT] = {0};
 
 // Background update interval in seconds. Default is 0 (disabled, opt-in).
 // 0 = disabled, 1800 = 30 mins, 3600 = 1 hour (recommended when enabled).
@@ -119,6 +126,9 @@ void settings_load(void) {
   if (persist_exists(KEY_PHONE_MANAGES_CARDS)) {
     s_phone_manages_cards = persist_read_bool(KEY_PHONE_MANAGES_CARDS);
   }
+  if (persist_exists(KEY_AUTO_HIDE_PRECIP)) {
+    s_auto_hide_precip = persist_read_bool(KEY_AUTO_HIDE_PRECIP);
+  }
   if (persist_exists(KEY_BG_UPDATE_INTERVAL)) {
     int iv = persist_read_int(KEY_BG_UPDATE_INTERVAL);
     // Sanity-guard the persisted interval. A prior build misparsed the
@@ -178,6 +188,30 @@ bool settings_get_phone_manages_cards(void) {
 void settings_set_phone_manages_cards(bool enabled) {
   s_phone_manages_cards = enabled;
   persist_write_bool(KEY_PHONE_MANAGES_CARDS, enabled);
+}
+
+bool settings_get_auto_hide_precip(void) {
+  return s_auto_hide_precip;
+}
+
+void settings_set_auto_hide_precip(bool enabled) {
+  s_auto_hide_precip = enabled;
+  persist_write_bool(KEY_AUTO_HIDE_PRECIP, enabled);
+}
+
+bool settings_get_auto_hidden(ToggleId id) {
+  if (id >= SETTINGS_TOGGLEABLE_COUNT) return false;
+  return s_auto_hidden[id];
+}
+
+void settings_set_auto_hidden(ToggleId id, bool hidden) {
+  if (id >= SETTINGS_TOGGLEABLE_COUNT) return;
+  s_auto_hidden[id] = hidden;
+}
+
+bool settings_get_effective_enabled(ToggleId id) {
+  if (id >= SETTINGS_TOGGLEABLE_COUNT) return true;
+  return s_enabled[id] && !s_auto_hidden[id];
 }
 
 bool settings_get_enabled(ToggleId id) {

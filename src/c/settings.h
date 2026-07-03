@@ -71,6 +71,22 @@ void settings_set_select_toggles_theme(bool enabled);
 bool settings_get_phone_manages_cards(void);
 void settings_set_phone_manages_cards(bool enabled);
 
+// Opt-in (Phase 3.2): auto-hide the Precipitation + Radar cards when no rain is
+// expected soon, reclaiming carousel space when it's dry. Default off. Persisted.
+bool settings_get_auto_hide_precip(void);
+void settings_set_auto_hide_precip(bool enabled);
+
+// Runtime auto-hidden state, tracked SEPARATELY from the persisted user enable
+// flags so auto-hide never mutates the user's preference. Effective visibility
+// = user_enabled AND NOT auto_hidden (see settings_get_effective_enabled).
+// Not persisted — recomputed from weather data each launch/update.
+bool settings_get_auto_hidden(ToggleId id);
+void settings_set_auto_hidden(ToggleId id, bool hidden);
+
+// Effective card visibility fed to nav: the user's enable flag AND not
+// auto-hidden. This is what the traversal/indicator should reflect.
+bool settings_get_effective_enabled(ToggleId id);
+
 bool settings_get_enabled(ToggleId id);
 void settings_set_enabled(ToggleId id, bool enabled);
 

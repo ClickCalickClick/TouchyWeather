@@ -155,7 +155,8 @@
       "CardEnabledNight",
       "CardEnabledGolden",
       "CardEnabledRadar",
-      "CardEnabledAdvice"
+      "CardEnabledAdvice",
+      "AutoHidePrecip"
     ],
     "resources": {
     "media": [

@@ -31,8 +31,9 @@ static const int s_toggle_to_card_idx[SETTINGS_TOGGLEABLE_COUNT] = {
 
 static void prv_apply_card_visibility(void) {
   for (int i = 0; i < SETTINGS_TOGGLEABLE_COUNT; ++i) {
+    // Effective visibility = user enabled AND not auto-hidden (Phase 3.2).
     nav_set_enabled(s_toggle_to_card_idx[i],
-                    settings_get_enabled((ToggleId)i));
+                    settings_get_effective_enabled((ToggleId)i));
   }
 }
 

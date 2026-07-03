@@ -187,6 +187,13 @@ module.exports = [
         "messageKey": "CardEnabledAdvice",
         "label": "Touch & Go (advice)",
         "defaultValue": true
+      },
+      {
+        "type": "toggle",
+        "messageKey": "AutoHidePrecip",
+        "label": "Auto-hide Rain & Radar when dry",
+        "description": "When on, the Rain and Radar cards are automatically hidden while no rain is expected in the next few hours, and reappear the moment rain is forecast. Only hides cards you have enabled; it never overrides a card you turned off.",
+        "defaultValue": false
       }
     ]
   },

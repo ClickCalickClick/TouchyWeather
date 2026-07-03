@@ -11,6 +11,13 @@
 static CommUpdateCb s_update_cb = NULL;
 static CommVisibilityCb s_visibility_cb = NULL;
 
+// Phase 3.2 auto-hide tuning (see DECISIONS.md 3.2 to change these).
+#define AUTO_HIDE_STALE_SECS   (3 * 60 * 60)  // fail open if data older than 3h
+#define AUTO_HIDE_POP_THRESHOLD 40            // % chance in the next 6h → "rain"
+#define AUTO_HIDE_DRY_UPDATES   2             // consecutive dry evals before hide
+static int s_dry_updates = 0;                 // hysteresis counter
+static void prv_evaluate_auto_hide(void);
+
 // Background update state
 static int s_bg_fail_count = 0;
 static const int s_max_backoff_mins = 240;  // 4 hours cap
@@ -179,6 +186,13 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
     // Re-apply the (now-updated) enable flags to nav so the rotation and page
     // dots reflect Clay immediately.
     if (vis_changed && s_visibility_cb) s_visibility_cb();
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_AutoHidePrecip))) {
+    bool on = (t->type == TUPLE_CSTRING) ? (atoi(t->value->cstring) != 0)
+                                         : (t->value->int32 != 0);
+    settings_set_auto_hide_precip(on);
+    // Re-evaluate immediately so turning it on/off takes effect at once.
+    prv_evaluate_auto_hide();
   }
   if ((t = dict_find(iter, MESSAGE_KEY_BackgroundUpdateInterval))) {
     int old_interval = settings_get_background_interval();
@@ -382,6 +396,7 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
   if (got_anything) {
     d->valid = true;
     prv_save_cache();
+    prv_evaluate_auto_hide();  // Phase 3.2: re-hide/show precip+radar per forecast
     anim_kick();  // fresh data: wake the hero icon for another window
     if (s_update_cb) s_update_cb();
     // Notify the pull-to-refresh sheet so it can close. Safe in any
@@ -450,6 +465,51 @@ void comm_set_visibility_callback(CommVisibilityCb cb) {
   s_visibility_cb = cb;
 }
 
+// Phase 3.2: is measurable rain expected soon? Cautious (false-negative averse):
+// any of the near-term signals firing means "rain" → keep the cards shown.
+static bool prv_rain_expected(WeatherData *d) {
+  if (d->rain_alert_min >= 0) return true;  // data source flagged imminent rain
+  for (int i = 0; i < 6; ++i) {             // high chance in the next 6 hours
+    if (d->hours_pop[i] >= AUTO_HIDE_POP_THRESHOLD) return true;
+  }
+  return false;
+}
+
+// Decide whether precip+radar should be auto-hidden right now and apply it.
+// Guardrails: fail open on bad/stale data, hysteresis (hide slowly, show fast),
+// and never mutate the user's persisted enable flags (auto-hidden is separate;
+// effective visibility = user_enabled AND NOT auto_hidden).
+static void prv_evaluate_auto_hide(void) {
+  bool want_hidden;
+  if (!settings_get_auto_hide_precip()) {
+    want_hidden = false;      // feature off → never auto-hide
+    s_dry_updates = 0;
+  } else {
+    WeatherData *d = weather_data_get();
+    uint32_t now = (uint32_t)time(NULL);
+    bool stale = (d->last_updated == 0) ||
+                 (now - d->last_updated > AUTO_HIDE_STALE_SECS);
+    if (!d->valid || stale) {
+      want_hidden = false;    // fail open: never hide on missing/old data
+      s_dry_updates = 0;
+    } else if (prv_rain_expected(d)) {
+      want_hidden = false;    // rain → show immediately, reset hysteresis
+      s_dry_updates = 0;
+    } else {
+      s_dry_updates++;        // dry → hide only after N consecutive dry evals
+      want_hidden = (s_dry_updates >= AUTO_HIDE_DRY_UPDATES);
+    }
+  }
+  bool changed =
+      (settings_get_auto_hidden(TOGGLE_PRECIP) != want_hidden) ||
+      (settings_get_auto_hidden(TOGGLE_RADAR)  != want_hidden);
+  if (changed) {
+    settings_set_auto_hidden(TOGGLE_PRECIP, want_hidden);
+    settings_set_auto_hidden(TOGGLE_RADAR, want_hidden);
+    if (s_visibility_cb) s_visibility_cb();  // re-apply effective visibility
+  }
+}
+
 static void prv_initial_refresh(void *ctx) {
   (void)ctx;
   
@@ -480,6 +540,10 @@ static void prv_initial_refresh(void *ctx) {
 
 void comm_load_cache(void) {
   prv_load_cache();
+  // Phase 3.2: evaluate auto-hide against the just-loaded cache so the rotation
+  // reflects the forecast from the first draw (hysteresis means one dry cache
+  // read won't hide yet — it takes effect after a subsequent dry update).
+  prv_evaluate_auto_hide();
   // Trigger redraw if cache was loaded so the screen reconciles immediately.
   // This prevents the imperial mock flash for metric users.
   if (s_update_cb && weather_data_get()->valid) {

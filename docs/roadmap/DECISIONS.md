@@ -270,3 +270,46 @@ reverse**. Newest phase last. This is Jared's morning review sheet.
   Radar disabled + `PhoneManagesCards=true` (harmless; committed code defaults
   are off/enabled). Cold-boot the emulator to clear it if a later check needs
   Radar visible.
+
+---
+
+## Phase 3.2 — Conditional precipitation UI
+
+### 3.2. Auto-hide Precip + Radar when dry (opt-in)
+- **What:** New opt-in `AutoHidePrecip` (Clay toggle, persist **206**, default off).
+  When on, the Precipitation and Radar cards are auto-hidden while no rain is
+  expected soon, and reappear immediately when rain is forecast. Implemented as a
+  runtime "auto-hidden" layer separate from the persisted user enable flags:
+  **effective visibility = user_enabled AND NOT auto_hidden** (new
+  `settings_get_effective_enabled`, now fed to nav by `prv_apply_card_visibility`).
+- **Predicate (`comm.c prv_rain_expected`, tunable `#define`s at top of comm.c):**
+  rain expected if `rain_alert_min >= 0` OR any `hours_pop[0..5] >= 40%`.
+  Deliberately cautious (false-negative averse) — any signal keeps the cards
+  shown. Dropped the amount (`hours_precip_x10`) secondary signal for simplicity;
+  POP already covers it. Reverse/tune: `AUTO_HIDE_POP_THRESHOLD` (40).
+- **Guardrails (all implemented):**
+  1. **Fail open** on bad/stale data — `!valid` or `last_updated` older than
+     `AUTO_HIDE_STALE_SECS` (**3 h**) → show. (Chose 3 h, not the launch-refresh
+     15-min staleness, which is far too aggressive for a hide/show decision —
+     data 20 min old is perfectly good for judging rain. Reverse: edit the define.)
+  2. **Hysteresis** — hide only after `AUTO_HIDE_DRY_UPDATES` (**2**) consecutive
+     dry evaluations; show immediately on rain (counter resets). Asymmetric:
+     reappears fast, hides slowly.
+  3. **Respects user toggles** — auto_hidden is a separate runtime flag; it never
+     mutates the persisted user enable flag, and effective = user AND NOT auto,
+     so a user-disabled card is never auto-shown.
+  4. **Clay master switch** `AutoHidePrecip`, default off (opt-in).
+- **Evaluation runs** after each data update (`comm.c` got_anything), on cache
+  load at launch, and when the Clay toggle changes. Both precip and radar are
+  hidden/shown together (one setting, per the doc's simpler option).
+- **Verification (emery emulator, via temporary forced predicates + hysteresis=1,
+  all reverted):**
+  - Forced dry (+ real dry data) → **Rain card absent** from the rotation
+    (Main→6 Hours→Week→UV, skipping Rain). ✅ (hide)
+  - Forced rain → **Rain card reappears** (down-3 = Precipitation). ✅ (show)
+  - Fail-open + guardrail-3 use the same `want_hidden=false` / `effective_enabled`
+    paths just exercised — verified by construction, not separately screenshotted.
+  - Note: the emery emulator's flash **persist survives qemu restarts**, so its
+    Touch&Go + Radar cards are user-disabled from earlier-phase test taps — a red
+    herring during nav checks, unrelated to auto-hide. The clean signal was the
+    always-user-enabled Rain card.
