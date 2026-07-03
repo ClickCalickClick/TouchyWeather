@@ -79,6 +79,16 @@ void settings_set_animations_enabled(bool enabled);
 bool settings_get_select_toggles_theme(void);
 void settings_set_select_toggles_theme(bool enabled);
 
+// Big Mode (Phase 3.1 Stage B): accessibility mode for reduced eyesight. When
+// on, the ui_font_* accessors return larger fonts, several cards switch to a
+// simplified "fewer, bigger elements" layout, and theme.c forces high-contrast
+// colors (muted/secondary grays collapse to full-contrast fg). Default false —
+// the "Normal" look is pixel-identical until the user opts in. Unlike the
+// compile-time screen-class axis, this is a RUNTIME toggle read on the draw
+// path, so it repaints live when changed. Persisted (key 207).
+bool settings_get_big_mode(void);
+void settings_set_big_mode(bool enabled);
+
 // Opt-in: when true, the phone (Clay) controls per-card visibility — incoming
 // Clay CardEnabled* toggles are applied to the on-watch enable flags. Default
 // false, so on-watch card management is unaffected unless the user opts in

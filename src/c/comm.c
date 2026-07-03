@@ -154,6 +154,14 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
                                          : (t->value->int32 != 0);
     settings_set_select_toggles_theme(on);
   }
+  if ((t = dict_find(iter, MESSAGE_KEY_BigMode))) {
+    // Big Mode (Stage B): larger fonts + high contrast. Repaint immediately so
+    // the current card switches look the moment the toggle changes.
+    bool on = (t->type == TUPLE_CSTRING) ? (atoi(t->value->cstring) != 0)
+                                         : (t->value->int32 != 0);
+    settings_set_big_mode(on);
+    if (s_update_cb) s_update_cb();
+  }
   // Phase 2.2: per-card visibility from Clay. Only applied when the user has
   // opted into phone control (PhoneManagesCards); otherwise on-watch card
   // management is left untouched. Card ORDER always stays on-watch.

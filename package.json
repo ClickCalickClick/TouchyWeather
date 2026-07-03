@@ -159,6 +159,7 @@
       "BackgroundUpdateInterval",
       "AnimationsEnabled",
       "SelectTogglesTheme",
+      "BigMode",
       "PhoneManagesCards",
       "CardEnabledHours",
       "CardEnabledWeek",

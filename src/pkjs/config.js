@@ -41,6 +41,13 @@ module.exports = [
         "label": "Animations",
         "description": "Animate the weather icon and effects. Turn off to save battery — the icon shows a single static frame. (Animations also pause automatically a few seconds after you stop interacting.)",
         "defaultValue": true
+      },
+      {
+        "type": "toggle",
+        "messageKey": "BigMode",
+        "label": "Big Mode",
+        "description": "Accessibility mode for easier reading: much larger fonts, high-contrast colors, and simplified cards that show fewer, bigger items (the main card shows just the temperature and condition; forecast cards show fewer rows). The full detail is still available by pressing SELECT-and-hold (or swiping up) on a card.",
+        "defaultValue": false
       }
     ]
   },

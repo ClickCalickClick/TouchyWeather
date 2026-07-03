@@ -10,6 +10,7 @@
 #define KEY_SELECT_TOGGLES_THEME 204 // bool: SELECT flips theme on ordinary cards
 #define KEY_PHONE_MANAGES_CARDS 205  // bool: Clay controls per-card visibility
 #define KEY_AUTO_HIDE_PRECIP   206  // bool: auto-hide precip/radar when dry
+#define KEY_BIG_MODE           207  // bool: Big Mode (large fonts + high contrast)
 #define KEY_TOGGLE_BASE        210  // KEY_TOGGLE_BASE + ToggleId
 #define KEY_CARD_ORDER         220  // SETTINGS_TOGGLEABLE_COUNT bytes
 
@@ -29,6 +30,13 @@ static bool s_phone_manages_cards = false;
 
 // Opt-in (Phase 3.2): auto-hide precip/radar when dry. Default off.
 static bool s_auto_hide_precip = false;
+
+// Big Mode (Phase 3.1 Stage B): accessibility mode — larger fonts, fewer/bigger
+// elements per card, and hardcoded high-contrast colors. Default off, so the
+// standard "Normal" look is unchanged until the user opts in. Runtime-toggleable
+// (read on the draw path by the ui_font_* accessors and theme.c), unlike the
+// compile-time screen-class axis. Persisted.
+static bool s_big_mode = false;
 
 // Runtime auto-hidden flags (not persisted). Only precip/radar are ever set.
 static bool s_auto_hidden[SETTINGS_TOGGLEABLE_COUNT] = {0};
@@ -157,6 +165,9 @@ void settings_load(void) {
   if (persist_exists(KEY_AUTO_HIDE_PRECIP)) {
     s_auto_hide_precip = persist_read_bool(KEY_AUTO_HIDE_PRECIP);
   }
+  if (persist_exists(KEY_BIG_MODE)) {
+    s_big_mode = persist_read_bool(KEY_BIG_MODE);
+  }
   if (persist_exists(KEY_BG_UPDATE_INTERVAL)) {
     int iv = persist_read_int(KEY_BG_UPDATE_INTERVAL);
     // Sanity-guard the persisted interval. A prior build misparsed the
@@ -207,6 +218,15 @@ bool settings_get_select_toggles_theme(void) {
 void settings_set_select_toggles_theme(bool enabled) {
   s_select_toggles_theme = enabled;
   persist_write_bool(KEY_SELECT_TOGGLES_THEME, enabled);
+}
+
+bool settings_get_big_mode(void) {
+  return s_big_mode;
+}
+
+void settings_set_big_mode(bool enabled) {
+  s_big_mode = enabled;
+  persist_write_bool(KEY_BIG_MODE, enabled);
 }
 
 bool settings_get_phone_manages_cards(void) {
