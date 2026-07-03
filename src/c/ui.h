@@ -1,16 +1,30 @@
 #pragma once
 #include <pebble.h>
 
+// --- Layout metric accessors (Phase 3.1 Stage A) ---
+//
+// The shared layout constants below now route through accessor functions
+// (defined in ui.c) so Big Mode (Stage B) and the per-screen-class layout
+// work (Phase 5) have ONE place to scale margins/header geometry. The
+// UI_* macros are kept as zero-cost aliases so no call site had to change
+// — every card still reads UI_MARGIN_X / UI_HEADER_Y / UI_HEADER_HEIGHT
+// and gets the identical value it did before. The current values live in
+// the function bodies and are the protected "Normal" layout.
+
 // Symmetric horizontal margin used by every card so left and right
 // padding always match. Tighter on rectangular displays where bezel
-// is smaller, looser on round to avoid the corner curve.
-#define UI_MARGIN_X PBL_IF_ROUND_ELSE(20, 12)
-
+// is smaller, looser on round to avoid the corner curve. [round 20 / rect 12]
+int ui_margin_x(void);
 // Standardized header y-offset used by all cards. Tight on rect
 // (8px from top) to reclaim vertical space; round needs more clearance
-// for the bezel curve.
-#define UI_HEADER_Y PBL_IF_ROUND_ELSE(24, 8)
-#define UI_HEADER_HEIGHT 24
+// for the bezel curve. [round 24 / rect 8]
+int ui_header_y(void);
+// Standardized header band height used by all cards. [24]
+int ui_header_height(void);
+
+#define UI_MARGIN_X (ui_margin_x())
+#define UI_HEADER_Y (ui_header_y())
+#define UI_HEADER_HEIGHT (ui_header_height())
 
 // --- Font role accessors (Phase 3.1 Stage A) ---
 //

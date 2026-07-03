@@ -15,6 +15,14 @@ GFont ui_font_label(void)   { return fonts_get_system_font(FONT_KEY_GOTHIC_14_BO
 GFont ui_font_caption(void) { return fonts_get_system_font(FONT_KEY_GOTHIC_14); }
 GFont ui_font_number(void)  { return fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS); }
 
+// --- Layout metric accessors (Phase 3.1 Stage A) ---
+// Single scaling point for the shared layout constants. Values are the
+// verbatim pre-refactor macro values; Big Mode / Phase 5 will branch here
+// on scale + screen class. The UI_* macros in ui.h alias these.
+int ui_margin_x(void)      { return PBL_IF_ROUND_ELSE(20, 12); }
+int ui_header_y(void)      { return PBL_IF_ROUND_ELSE(24, 8); }
+int ui_header_height(void) { return 24; }
+
 static void prv_format_ago(uint32_t when, char *out, size_t n) {
   if (!when) { snprintf(out, n, "UPDATED --"); return; }
   uint32_t now = (uint32_t)time(NULL);
