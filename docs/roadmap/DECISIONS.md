@@ -703,3 +703,147 @@ later, never something we migrate away from.
   touching call sites. The accessors are currently single-axis (return current
   value); adding the two axes is the first task of whichever of those phases runs
   next.
+
+---
+
+## Phase 5 — Platform expansion to 6 shippable watches (2026-07-03, evening)
+
+Resumed on `feature/roadmap-phases`. Jared set this session on **Phase 5**, the
+first consumer of Stage A. Two scope decisions up front (AskUserQuestion):
+**(1) enable all 6 shippable platforms this session** (aplite excluded — RAM
+no-go), and **(2) decide radar-on-64KB by measurement, not napkin math.**
+**6 new commits**, tree clean, `pebble build` green for **all 6 platforms**,
+**nothing pushed**. `targetPlatforms` went `["emery","gabbro"]` →
+`["basalt","chalk","diorite","emery","flint","gabbro"]`.
+
+The overriding constraint all session: **emery + gabbro must stay pixel-
+identical** (they're already their own screen classes). Every change below is
+compile-time gated so those two compile byte-for-byte unchanged — verified after
+*every* commit by diffing the built `pebble-app.bin` code+data body against the
+pre-Phase-5 HEAD (**0 differing bytes past the 168-byte app header** — the header
+only differs in build timestamp/CRC). This is a stronger proof than the Stage A
+screenshot diff (no hero-animation / banner-time confounds).
+
+### ☀️ Phase 5 morning summary (what shipped)
+| Platform | Class | Color | Result |
+|---|---|---|---|
+| basalt | small-rect 144×168 | color | ✅ hero font shrunk, radar carved out |
+| chalk | **small-round 180×180** (new class) | color | ✅ banner re-tuned, radar carved out |
+| diorite | small-rect 144×168 | **B&W** | ✅ 5.3 accent/banner fallback, radar carved out |
+| flint | small-rect 144×168 | **B&W** | ✅ same as diorite |
+| emery | large-rect 200×228 | color | ✅ **byte-identical** (unchanged) |
+| gabbro | large-round 260×260 | color | ✅ **byte-identical** (unchanged) |
+
+aplite: **not shipped** (24KB App RAM < ~51KB binary — unchanged from the doc).
+
+### 5.0. Screen-class axis added to the Stage A accessors (commit 1)
+- **What:** A 4-class compile-time axis (`UI_SCREEN_SMALL_RECT` / `_SMALL_ROUND` /
+  `_LARGE_RECT` / `_LARGE_ROUND`) in `ui.h`, derived from the SDK's own
+  `PBL_ROUND` + `PBL_DISPLAY_WIDTH` defines (verified present on every platform).
+  The 3 shared metric accessors (`ui_margin_x/header_y/header_height`) became
+  4-way tables. The two LARGE branches return the **verbatim** pre-Phase-5
+  `PBL_IF_ROUND_ELSE` values; the two SMALL classes started **equal to their
+  large sibling** (tuned later per platform with screenshot evidence, never up
+  front — the "prove before you spread" discipline the handoff insisted on).
+- **Why compile-time (not runtime):** matches the existing `PBL_IF_ROUND_ELSE`
+  idiom, zero runtime cost, and lets emery/gabbro resolve to the identical
+  constants → byte-identical. Reverse: collapse each table back to
+  `PBL_IF_ROUND_ELSE`.
+
+### 5.1. small-rect hero numeral font (commit 2, basalt)
+- **What:** `ui_font_number()` (LECO_42, the temp/UV/AQI hero) → **LECO_36_BOLD_
+  NUMBERS on small-rect**. On 144px the LECO_42 temp overflowed its box and
+  clipped to "6…". One accessor change fixes temp + UV + AQI heroes at once.
+  Large classes keep LECO_42 verbatim. Degree glyph verified present in LECO_36.
+- **Reverse:** drop the `#if UI_SCREEN_SMALL_RECT` branch.
+
+### 5.2. Radar carve-out on non-128KB platforms (commit 3) — **measured**
+- **Measurement (the "decide by measurement" ask):** the radar buffer is
+  `malloc`'d lazily (25.6KB staging + a 25.6KB GBitmap coexist, ~51KB peak).
+  A real **basalt build reports 14,108 bytes free heap** (footprint 51,428/64KB).
+  14KB < 25.6KB ⇒ radar physically cannot fit on any 64KB platform. Conclusive;
+  not napkin math.
+- **Mechanic chosen (low-risk):** rather than skip `nav_register("Radar",…)`
+  (which the positional `IDX_*` index scheme would break — Settings is a hard-
+  coded index 11), I reused the **Phase 3.2 nav-skip path**: a new
+  `TW_RADAR_SUPPORTED` macro (defined only on emery/gabbro) makes
+  `settings_get_effective_enabled(TOGGLE_RADAR)` return false on every other
+  platform. Nav then skips radar exactly like a user-disabled card, so the card
+  is **never navigated to → its buffer never allocates → no OOM.** `TOGGLE_RADAR`
+  keeps its id + persist key on all platforms (settings survive if data roams).
+- **Verified:** on basalt, UP×2 from Main lands on **Golden Hour** (Main→Settings
+  →Golden Hour) — radar absent from the rotation.
+- **⚠️ Known deferred (cosmetic):** the **Settings card still lists an inert
+  "RADAR" row** on carved-out platforms (toggling it does nothing — effective
+  stays off). Hiding it cleanly needs a shared settings cursor/reorder change
+  (radar is `ToggleId` 8, *not* last, so a compile-time count reduction would
+  excise the wrong card); judged too risky-for-cosmetic under the "keep emery/
+  gabbro identical" constraint. Left as a follow-up.
+
+### 5.3. small-round banner (commit 4, chalk)
+- **What:** chalk is a genuinely new screen class — the round layout values were
+  gabbro-260-tuned. The status-banner `pad_bottom` (35px) pushed the pill into
+  mid-content on 180px (it covered the 17:00 row on 6 Hours). small-round now
+  gets an 18px pad so the banner hugs the bottom, reclaiming a row. Large-round
+  (gabbro) keeps 35px verbatim.
+- **Reverse:** drop the `#if UI_SCREEN_SMALL_ROUND` branch in
+  `ui_draw_status_banner`.
+
+### 5.4. B&W color-fallback pass (commit 5, "5.3" in the phase doc)
+- **What (the critical B&W fix):** on 1-bit the SDK auto-reduces the accents
+  (ChromeYellow/VividCerulean/VividViolet) to **GColorWhite — invisible on the
+  light theme's white bg.** On diorite the hi/lo temps, arrows, droplet and gauge
+  fills all **vanished.** Accents now fall back to `theme_fg()` on `PBL_BW`
+  (`PBL_IF_COLOR_ELSE`), always the opposite of the bg. Hue-based meaning is
+  preserved by **shape** (up/down arrows, distinct icons/markers) per the doc.
+- **Banner on B&W:** an accent pill collapses to fg (black text on it vanishes)
+  and a muted pill dithers illegibly, so on `PBL_BW` the banner draws a **solid
+  inverted pill** (fg bg + bg text) — crisp in both rain/updated modes.
+- **Audit:** 47 accent call sites; the accents-as-*fill* uses (UV/precip/chart)
+  paint on the bg, so fg-fill stays visible. The only accent-as-bg-under-text
+  case is the banner, handled above.
+- **Not changed:** `theme_muted` (tracks/dividers/inactive dots) still dithers —
+  acceptable for thin chrome; `theme_secondary` still DarkGray (dithers but reads).
+  Revisit only if a screenshot pass finds an illegible spot.
+- **Reverse:** restore the three accent bodies to their bare `GColor…` and drop
+  the `#if PBL_BW` banner branch.
+
+### Verification (and its honest limits)
+- **emery+gabbro byte-identical** after every commit (the primary safety net) —
+  see above. basalt/chalk/diorite/flint each **screenshot-verified on their
+  emulator**: main card + a header/gauge/list card render legibly, hero fonts fit,
+  radar absent from rotation, B&W accents visible, banners crisp.
+- **NOT a full 12-card × 6-platform matrix.** The emulator is flaky (the watchapp
+  **idle-exits to the system watchface**, so navigation drops into the Timeline
+  "No events" between shots — drove installs + fast button bursts to stay in-app).
+  I verified ~8 basalt cards, main+6Hours on chalk, main+AQI on diorite, main on
+  flint. **The remaining per-card small-screen fine-tuning is the 5.2 sweep** and
+  is left as documented follow-up (see below).
+
+### ⚠️ Things to review / flagged
+1. **Pre-existing UV tofu (NOT this session's bug):** the UV hero draws a **tofu
+   box** when live UV is negative/unknown — the LECO fonts lack a minus glyph.
+   **Reproduced identically on the untouched emery LECO_42 path**, so it predates
+   Phase 5 and is data-dependent (only shows on bad UV data). Worth a separate
+   fix (clamp UV to ≥0, or special-case "—"). Flagged, not fixed.
+2. **Radar "RADAR" row still shows in Settings** on the 4 carved-out platforms
+   (inert). Cosmetic; see 5.2.
+3. **5.2 per-card sweep is incomplete by design.** Shared-metric scaling is in
+   (margins, header, hero font, banner), but individual cards tuned for 200/260
+   still have minor small-screen crowding — e.g. chalk 6 Hours hides one row
+   under the banner; basalt main has slight FEELS/hi-lo crowding. All **legible
+   and shippable**, none clipped. A leisurely screenshot-matrix polish per card
+   is the natural next increment.
+4. **Everything still rides the unmerged branch** — Phase 4's hardware sign-off
+   (SELECT/BACK, swipe-up, background refresh) still gates the merge, and Phase 5
+   adds its own **hardware-pass items**: confirm radar-absence + B&W legibility on
+   real diorite/flint, and that 64KB heap holds up in real use (detail modals /
+   refresh sheet on 14KB free).
+
+### What this unblocks / next
+- **Big Mode (Stage B)** is now the last big roadmap item: it adds the **scale
+  axis** (Normal/Big) inside the same accessor bodies that now carry the screen-
+  class axis. The pattern is proven twice over (Stage A single-axis → Phase 5
+  screen-class); Stage B is the third axis in the same place.
+- Or, the **5.2 per-card polish sweep** (small-rect + small-round value tuning,
+  card by card, screenshot matrix) if a tighter look is wanted before Big Mode.
