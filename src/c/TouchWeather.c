@@ -7,6 +7,7 @@
 #include "anim.h"
 #include "settings.h"
 #include "refresh_sheet.h"
+#include "detail_modal.h"
 #include "update_notes.h"
 #include "cards/cards.h"
 
@@ -74,6 +75,9 @@ static void touch_handler(const TouchEvent *event, void *context) {
       s_tracking = true;
       s_start_x = event->x;
       s_start_y = event->y;
+      // Detail modal owns all touch while open (drag-down to dismiss handled
+      // on liftoff); don't let the refresh sheet start tracking underneath it.
+      if (detail_modal_is_active()) break;
       // The What's New modal sits on top, so it gets first crack: a drag
       // there scrolls the notes and consumes the gesture.
       if (update_notes_on_touchdown(event->x, event->y)) break;
@@ -92,6 +96,13 @@ static void touch_handler(const TouchEvent *event, void *context) {
       break;
     case TouchEvent_Liftoff: {
       if (!s_tracking) break;
+      // Detail modal: a downward flick dismisses it; any other touch is
+      // swallowed so card nav stays locked while it's open.
+      if (detail_modal_is_active()) {
+        if (event->y - s_start_y > 30) detail_modal_close();
+        s_tracking = false;
+        break;
+      }
       if (update_notes_on_liftoff(event->x, event->y)) {
         s_tracking = false;
         break;
@@ -136,9 +147,19 @@ static void touch_handler(const TouchEvent *event, void *context) {
 }
 #endif
 
+// Phase 4: which detail modal (if any) the current card opens on SELECT-long.
+static DetailType prv_detail_for_current(void) {
+  const char *n = nav_current_name();
+  if (strcmp(n, "6 Hours") == 0) return DETAIL_HOURS;
+  if (strcmp(n, "Precipitation") == 0) return DETAIL_PRECIP;
+  return DETAIL_NONE;
+}
+
 static void prv_select_click(ClickRecognizerRef r, void *ctx) {
   (void)r; (void)ctx;
   anim_kick();  // user activity: resume/extend decorative animation
+  // While a detail modal is open, SELECT toggles its secondary overlay.
+  if (detail_modal_is_active()) { detail_modal_handle_select(); return; }
   if (refresh_sheet_is_active()) return;
   // Context-aware short-press:
   //   Radar    → retry fetch (bypasses 60s cooldown)
@@ -178,14 +199,17 @@ static void prv_select_click(ClickRecognizerRef r, void *ctx) {
 static void prv_select_long(ClickRecognizerRef r, void *ctx) {
   (void)r; (void)ctx;
   anim_kick();
+  if (detail_modal_is_active()) return;  // no re-trigger while modal is open
   if (refresh_sheet_is_active()) return;
-  // Long-press SELECT toggles theme everywhere EXCEPT the Settings
-  // card, where it is a no-op so an accidental hold while the user is
-  // reaching for UP/DOWN reorder doesn't flip the theme out from under
-  // them. Theme is still reachable from every other card and Clay.
   if (strcmp(nav_current_name(), "Settings") == 0) return;
-  // Gated by SelectTogglesTheme (Task 1.2). When off, SELECT-long is a no-op
-  // here; Phase 4 claims it to open the forecast detail modal.
+  // Phase 4: on forecast cards that have a detail view, SELECT-long opens the
+  // bottom-sheet detail modal (claims the gesture unconditionally there).
+  DetailType dt = prv_detail_for_current();
+  if (dt != DETAIL_NONE) {
+    detail_modal_open(dt);
+    return;
+  }
+  // Elsewhere, SELECT-long still toggles theme (gated by SelectTogglesTheme).
   if (settings_get_select_toggles_theme()) {
     theme_set(theme_get() == THEME_LIGHT ? THEME_DARK : THEME_LIGHT);
     nav_redraw();
@@ -195,6 +219,7 @@ static void prv_select_long(ClickRecognizerRef r, void *ctx) {
 static void prv_up_click(ClickRecognizerRef r, void *ctx) {
   (void)r; (void)ctx;
   anim_kick();
+  if (detail_modal_is_active()) { detail_modal_handle_up(); return; }
   if (refresh_sheet_is_active()) return;
   nav_prev();
 }
@@ -202,6 +227,7 @@ static void prv_up_click(ClickRecognizerRef r, void *ctx) {
 static void prv_down_click(ClickRecognizerRef r, void *ctx) {
   (void)r; (void)ctx;
   anim_kick();
+  if (detail_modal_is_active()) { detail_modal_handle_down(); return; }
   if (refresh_sheet_is_active()) return;
   nav_next();
 }
@@ -211,6 +237,7 @@ static void prv_down_click(ClickRecognizerRef r, void *ctx) {
 // already handled the nav action on press-down).
 static void prv_up_long(ClickRecognizerRef r, void *ctx) {
   (void)r; (void)ctx;
+  if (detail_modal_is_active()) return;
   if (refresh_sheet_is_active()) return;
   if (strcmp(nav_current_name(), "Settings") != 0) return;
   if (settings_move_up(settings_cursor())) {
@@ -221,12 +248,24 @@ static void prv_up_long(ClickRecognizerRef r, void *ctx) {
 
 static void prv_down_long(ClickRecognizerRef r, void *ctx) {
   (void)r; (void)ctx;
+  if (detail_modal_is_active()) return;
   if (refresh_sheet_is_active()) return;
   if (strcmp(nav_current_name(), "Settings") != 0) return;
   if (settings_move_down(settings_cursor())) {
     prv_sync_nav_traversal();
     nav_redraw();
   }
+}
+
+// BACK: dismiss an open detail modal; otherwise exit the app. Single-click on
+// BACK IS delivered on this SDK (unlike long/raw — see DECISIONS.md 2.1) and
+// fires on release with no added latency, so exit timing is preserved.
+// Subscribing it overrides the firmware default, so exit is re-implemented here.
+static void prv_back_click(ClickRecognizerRef r, void *ctx) {
+  (void)r; (void)ctx;
+  anim_kick();
+  if (detail_modal_handle_back()) return;  // modal open → dismiss, don't exit
+  window_stack_pop_all(true);
 }
 
 static void prv_click_config_provider(void *context) {
@@ -236,6 +275,7 @@ static void prv_click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_DOWN, prv_down_click);
   window_long_click_subscribe(BUTTON_ID_UP, 500, prv_up_long, NULL);
   window_long_click_subscribe(BUTTON_ID_DOWN, 500, prv_down_long, NULL);
+  window_single_click_subscribe(BUTTON_ID_BACK, prv_back_click);
 }
 
 static void prv_window_load(Window *window) {
@@ -261,6 +301,8 @@ static void prv_window_load(Window *window) {
   // Pull-to-refresh sheet sits above the nav layers so it can paint
   // over any card content while open.
   refresh_sheet_init(window);
+  // Detail modal (Phase 4) sits above everything else.
+  detail_modal_init(window);
 
 #if ENABLE_TOUCH && defined(PBL_TOUCH)
   if (touch_service_is_enabled()) {
@@ -274,6 +316,7 @@ static void prv_window_unload(Window *window) {
 #if ENABLE_TOUCH && defined(PBL_TOUCH)
   touch_service_unsubscribe();
 #endif
+  detail_modal_deinit();
   refresh_sheet_deinit();
   nav_deinit();
 }

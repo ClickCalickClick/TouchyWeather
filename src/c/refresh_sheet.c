@@ -3,6 +3,7 @@
 #include "comm.h"
 #include "anim.h"
 #include "nav.h"
+#include "detail_modal.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -381,8 +382,9 @@ bool refresh_sheet_is_active(void) {
 }
 
 void refresh_sheet_show_programmatic(void) {
-  // One overlay at a time: ignore if a sheet (or detail modal, later) is up.
+  // One overlay at a time: ignore if a sheet or detail modal is up.
   if (s_state != REFRESH_IDLE) return;
+  if (detail_modal_is_active()) return;
   // Enter the same OPENING → LOADING path a committed pull uses, minus the
   // touch tracking: start closed (y=0) and slide fully open. This gives
   // button-only platforms (and button users on touch models) identical

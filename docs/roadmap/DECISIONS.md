@@ -313,3 +313,54 @@ reverse**. Newest phase last. This is Jared's morning review sheet.
     Touch&Go + Radar cards are user-disabled from earlier-phase test taps — a red
     herring during nav checks, unrelated to auto-hide. The clean signal was the
     always-user-enabled Rain card.
+
+---
+
+## Phase 4 — Advanced Interaction & Data Density
+
+### 4.1 + 4.2. Bottom-sheet detail modals — PARTIAL (6 Hours + Precipitation of 5 cards)
+- **What shipped:** New `detail_modal.c/.h` — one reusable bottom sheet that
+  slides up from the bottom (modeled on `refresh_sheet.c`: IDLE/OPENING/OPEN/
+  CLOSING state machine, layer-frame slide, ease-out, 250 ms). All vector
+  drawing. Two modals implemented (the doc's recommended "prove the sheet with
+  the zero-plumbing cards first"):
+  - **6 Hours → TEMP TREND:** segmented temperature line + point markers,
+    min/max annotated (LECO), hour labels; **SELECT toggles a POP overlay**.
+  - **Precipitation → RAINFALL:** hourly amount bars, "RAIN IN Nh"/"NO RAIN SOON"
+    headline from `rain_alert_min`, POP row + hour labels.
+- **Gesture wiring (per the budget):** SELECT-long on a forecast card with a
+  detail opens its modal (claims the gesture there); on cards without one it
+  still theme-toggles (gated). While open: UP/DOWN locked (consumed), SELECT
+  toggles the overlay, **BACK dismisses**, touch drag-down dismisses. Mutually
+  exclusive with the refresh sheet (both refuse while the other is active).
+- **BACK single-click now subscribed** (`prv_back_click`): dismiss modal if open,
+  else exit. Note this is *short* BACK, which **does** fire on this SDK (unlike
+  the long/raw BACK that failed in 2.1), and on release with no added latency —
+  so it delivers the gesture budget's "BACK dismisses modal/sheet first, else
+  exit" without the 2.1 problem. Exit is re-implemented (`window_stack_pop_all`)
+  since subscribing overrides the firmware default.
+- **Deferred (remaining Phase 4 — clean stopping point):**
+  - **Week** (paged-by-day modal), **UV** (UV TODAY gauge + hourly curve),
+    **Air Quality** (pollutant breakdown). UV + AQI need new Open-Meteo fields →
+    `WeatherData` additions + PKJS fetch/pack → **one coordinated
+    `PERSIST_KEY_CACHE` bump (107→108)**, which is why they were left for a single
+    batched change rather than started half-way.
+  - Touch **long-press-on-element → contextual modal** (`hit_test` callback on
+    the Card struct) — not added; SELECT-long + drag-down cover the interaction.
+  - Underlying-card **dimming** while the sheet is open — skipped (the card top
+    peeks plainly above the sheet, which already reads as "overlay"). Easy to add.
+- **Judgment calls:**
+  - Content renderers live **in `detail_modal.c`** (dispatched by a `DetailType`
+    enum) rather than in each `cards/*.c` as the doc suggested — keeps the v1
+    self-contained and reviewable. Moving them next to their cards later is
+    mechanical. Reverse: split `prv_draw_hours`/`prv_draw_precip` into the card
+    files with public headers.
+  - Sheet height = **80%** of screen; the card's top stays visible.
+- **Verification (emery emulator, screenshots):** 6 Hours modal opens on
+  SELECT-long, renders the trend chart cleanly (fixed an initial hint/label
+  overlap), SELECT toggles the POP overlay, UP/DOWN are locked, BACK dismisses,
+  a second BACK exits. Precip modal renders (RAINFALL headline + POP + labels;
+  bars empty only because the live data is dry). SELECT-long on UV correctly
+  falls through to theme toggle. (Verified precip via a temporary card remap —
+  reverted — because this emulator's precip card is user-disabled in persist
+  from an earlier stray settings tap.)
