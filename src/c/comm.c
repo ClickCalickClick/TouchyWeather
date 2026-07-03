@@ -3,6 +3,7 @@
 #include "theme.h"
 #include "settings.h"
 #include "refresh_sheet.h"
+#include "anim.h"
 #include "cards/cards.h"
 #include <string.h>
 #include <stdlib.h>
@@ -126,6 +127,16 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
   }
   if ((t = dict_find(iter, MESSAGE_KEY_LoopNavigation))) {
     settings_set_loop_nav(t->value->int32 != 0);
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_AnimationsEnabled))) {
+    // Clay toggle → int 0/1; accept a CSTRING form too, for robustness.
+    bool on = (t->type == TUPLE_CSTRING) ? (atoi(t->value->cstring) != 0)
+                                         : (t->value->int32 != 0);
+    settings_set_animations_enabled(on);
+    // Resume decorative animation immediately when turned on; when turned
+    // off, anim_kick() is harmless (the next tick re-settles and stops).
+    anim_kick();
+    if (s_update_cb) s_update_cb();
   }
   if ((t = dict_find(iter, MESSAGE_KEY_BackgroundUpdateInterval))) {
     int old_interval = settings_get_background_interval();
@@ -329,6 +340,7 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
   if (got_anything) {
     d->valid = true;
     prv_save_cache();
+    anim_kick();  // fresh data: wake the hero icon for another window
     if (s_update_cb) s_update_cb();
     // Notify the pull-to-refresh sheet so it can close. Safe in any
     // state — it's a no-op unless the sheet is currently loading.

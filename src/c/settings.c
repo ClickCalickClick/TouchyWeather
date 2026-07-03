@@ -6,11 +6,15 @@
 //  theme_init() migrates any legacy key-200 value. See theme.c.)
 #define KEY_LOOP_NAV           201  // bool: wrap card carousel at edges
 #define KEY_BG_UPDATE_INTERVAL 202  // int: background update interval in seconds
+#define KEY_ANIMATIONS_ENABLED 203  // bool: decorative animation master switch
 #define KEY_TOGGLE_BASE        210  // KEY_TOGGLE_BASE + ToggleId
 #define KEY_CARD_ORDER         220  // SETTINGS_TOGGLEABLE_COUNT bytes
 
 // Default: loop the carousel (wrap at the first/last card).
 static bool s_loop_nav = true;
+
+// Decorative animation master switch. Default on (preserves current behavior).
+static bool s_animations_enabled = true;
 
 // Background update interval in seconds. Default is 0 (disabled, opt-in).
 // 0 = disabled, 1800 = 30 mins, 3600 = 1 hour (recommended when enabled).
@@ -96,6 +100,9 @@ void settings_load(void) {
   if (persist_exists(KEY_LOOP_NAV)) {
     s_loop_nav = persist_read_bool(KEY_LOOP_NAV);
   }
+  if (persist_exists(KEY_ANIMATIONS_ENABLED)) {
+    s_animations_enabled = persist_read_bool(KEY_ANIMATIONS_ENABLED);
+  }
   if (persist_exists(KEY_BG_UPDATE_INTERVAL)) {
     int iv = persist_read_int(KEY_BG_UPDATE_INTERVAL);
     // Sanity-guard the persisted interval. A prior build misparsed the
@@ -128,6 +135,15 @@ int settings_get_background_interval(void) {
 void settings_set_background_interval(int interval_secs) {
   s_bg_update_interval = interval_secs;
   persist_write_int(KEY_BG_UPDATE_INTERVAL, interval_secs);
+}
+
+bool settings_get_animations_enabled(void) {
+  return s_animations_enabled;
+}
+
+void settings_set_animations_enabled(bool enabled) {
+  s_animations_enabled = enabled;
+  persist_write_bool(KEY_ANIMATIONS_ENABLED, enabled);
 }
 
 bool settings_get_enabled(ToggleId id) {

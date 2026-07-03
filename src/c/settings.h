@@ -48,6 +48,13 @@ void settings_set_loop_nav(bool loop);
 int settings_get_background_interval(void);
 void settings_set_background_interval(int interval_secs);
 
+// Decorative animation master switch (hero icon, rotating banners, settings
+// footer hint). Default true. When false, decorative animation never runs —
+// the hero icon renders a single static frame. The refresh-sheet spinner is
+// unaffected (it's functional feedback, not decorative). Persisted.
+bool settings_get_animations_enabled(void);
+void settings_set_animations_enabled(bool enabled);
+
 bool settings_get_enabled(ToggleId id);
 void settings_set_enabled(ToggleId id, bool enabled);
 

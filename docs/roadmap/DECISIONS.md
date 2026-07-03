@@ -72,3 +72,56 @@ reverse**. Newest phase last. This is Jared's morning review sheet.
   renders the Main card correctly on emery; A/B compared against baseline (no
   behavior difference). Screenshot verification of the theme *toggle* itself was
   limited by E2 above.
+
+---
+
+## Phase 1 — Quick Wins & Stabilization
+
+### 1.1. Animation timeout + `AnimationsEnabled` toggle
+- **What:** Decorative animation (hero icon, rotating status banner, settings
+  footer hint) now freezes ~8 s after the last activity, and the 10 Hz ticker
+  **stops entirely** when fully idle (re-arms on activity) instead of running
+  forever. Added a persisted `AnimationsEnabled` master switch (default on) and
+  an `anim_kick()` activity signal.
+- **Design (freeze-by-not-dirtying, per the phase doc):**
+  - `anim.c` tracks `s_deadline_frame`. `anim_kick()` pushes it to
+    `s_frame + ANIM_TIMEOUT_FRAMES` and ensures the ticker is running.
+  - `prv_tick` only dirties decorative content while decorative is *active*
+    (setting on AND before the deadline). It keeps the ticker alive while
+    decorative is active OR `refresh_sheet_is_active()`; otherwise it stops
+    re-registering (zero idle cost).
+  - Crucially, `s_frame` (read by the refresh-sheet spinner via
+    `anim_get_frame()`) is **not** frozen — only the *dirtying* of decorative
+    content stops. The sheet-active code path is byte-for-byte the old behavior,
+    so the spinner is unaffected. This is why freezing the global frame value was
+    rejected: it would kill the spinner rotation.
+  - `anim_kick()` is called from: button handlers (select/up/down short + select
+    long), touch Touchdown, weather-data arrival (`comm.c` `got_anything`), and
+    the `AnimationsEnabled` decode.
+- **Chosen values / judgment calls:**
+  - **`ANIM_TIMEOUT_FRAMES = 80`** (~8 s at 10 Hz). Doc suggested 5–10 s; picked
+    the middle. Reverse: edit the `#define` in `anim.c` (50–100 = 5–10 s).
+  - **Frozen resting frame:** used whatever frame the icon last drew, not a pinned
+    index. Verified the sun/cloud/bob animations render a clean full icon at an
+    arbitrary frame (they're smooth periodic motions), so no pinned frame needed.
+  - **Persist key `203`** for `AnimationsEnabled` (203 was free; 200–202 / 210–220
+    taken). No `WeatherData` change → no cache bump.
+  - **Clay decode** mirrors the sibling boolean toggles (`ShowLocation`,
+    `LoopNavigation`) — int 0/1 — but also accepts a CSTRING form for robustness.
+  - **`update_notes` modal:** its decorative sun now also freezes if the modal is
+    left open past the timeout (it reads `anim_get_frame`, which stops advancing
+    when idle). Judged acceptable — the modal is transient and this aligns with
+    the battery goal. Not special-cased. Reverse: call `anim_kick()` from the
+    update_notes repaint tick if you want its sun to always animate.
+- **Verification (objective, via md5 of consecutive emulator frames):**
+  - Animating right after activity → consecutive frames **differ**. ✅
+  - After ~10 s idle → consecutive frames **byte-identical** (frozen). ✅
+  - Button press after freeze → frames **differ again** (re-armed). ✅
+  - Frozen hero renders as a clean, complete icon (screenshot). ✅
+  - `AnimationsEnabled=off` (tested via a temporary default flip, then reverted):
+    Main card **static from launch**, hero renders correctly. ✅
+  - Refresh-sheet spinner: **not runtime-tested** — emulator touch (pull-to-
+    refresh) isn't scriptable via `pebble emu-button`. Relied on the fact that the
+    sheet-active path is unchanged from baseline. Worth a manual pull-to-refresh
+    check on device/emulator. Programmatic refresh (Phase 5.1) will call
+    `anim_kick()` on show so the spinner ticks even from an idle state.

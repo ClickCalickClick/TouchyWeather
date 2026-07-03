@@ -34,6 +34,13 @@ module.exports = [
           { "label": "12-hour (2 PM)",  "value": "1" },
           { "label": "24-hour (14:00)", "value": "2" }
         ]
+      },
+      {
+        "type": "toggle",
+        "messageKey": "AnimationsEnabled",
+        "label": "Animations",
+        "description": "Animate the weather icon and effects. Turn off to save battery — the icon shows a single static frame. (Animations also pause automatically a few seconds after you stop interacting.)",
+        "defaultValue": true
       }
     ]
   },

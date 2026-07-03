@@ -69,6 +69,7 @@ static void touch_handler(const TouchEvent *event, void *context) {
   (void)context;
   switch (event->type) {
     case TouchEvent_Touchdown:
+      anim_kick();  // touch activity: resume/extend decorative animation
       s_tracking = true;
       s_start_x = event->x;
       s_start_y = event->y;
@@ -136,6 +137,7 @@ static void touch_handler(const TouchEvent *event, void *context) {
 
 static void prv_select_click(ClickRecognizerRef r, void *ctx) {
   (void)r; (void)ctx;
+  anim_kick();  // user activity: resume/extend decorative animation
   if (refresh_sheet_is_active()) return;
   // Context-aware short-press:
   //   Radar    → retry fetch (bypasses 60s cooldown)
@@ -161,6 +163,7 @@ static void prv_select_click(ClickRecognizerRef r, void *ctx) {
 
 static void prv_select_long(ClickRecognizerRef r, void *ctx) {
   (void)r; (void)ctx;
+  anim_kick();
   if (refresh_sheet_is_active()) return;
   // Long-press SELECT toggles theme everywhere EXCEPT the Settings
   // card, where it is a no-op so an accidental hold while the user is
@@ -173,12 +176,14 @@ static void prv_select_long(ClickRecognizerRef r, void *ctx) {
 
 static void prv_up_click(ClickRecognizerRef r, void *ctx) {
   (void)r; (void)ctx;
+  anim_kick();
   if (refresh_sheet_is_active()) return;
   nav_prev();
 }
 
 static void prv_down_click(ClickRecognizerRef r, void *ctx) {
   (void)r; (void)ctx;
+  anim_kick();
   if (refresh_sheet_is_active()) return;
   nav_next();
 }
