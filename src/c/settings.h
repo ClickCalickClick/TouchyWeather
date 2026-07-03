@@ -55,6 +55,14 @@ void settings_set_background_interval(int interval_secs);
 bool settings_get_animations_enabled(void);
 void settings_set_animations_enabled(bool enabled);
 
+// Whether a short/long SELECT press toggles light/dark theme on ordinary
+// cards. Default true (preserves the reflexive-press behavior). When false,
+// SELECT no longer flips the theme on ordinary cards (theme stays reachable
+// via Clay); the Main-card refresh, Radar refresh, and Settings row-toggle
+// are unaffected. Persisted.
+bool settings_get_select_toggles_theme(void);
+void settings_set_select_toggles_theme(bool enabled);
+
 bool settings_get_enabled(ToggleId id);
 void settings_set_enabled(ToggleId id, bool enabled);
 

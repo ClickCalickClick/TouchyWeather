@@ -138,6 +138,11 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
     anim_kick();
     if (s_update_cb) s_update_cb();
   }
+  if ((t = dict_find(iter, MESSAGE_KEY_SelectTogglesTheme))) {
+    bool on = (t->type == TUPLE_CSTRING) ? (atoi(t->value->cstring) != 0)
+                                         : (t->value->int32 != 0);
+    settings_set_select_toggles_theme(on);
+  }
   if ((t = dict_find(iter, MESSAGE_KEY_BackgroundUpdateInterval))) {
     int old_interval = settings_get_background_interval();
     // Clay's `select` control delivers its string option values

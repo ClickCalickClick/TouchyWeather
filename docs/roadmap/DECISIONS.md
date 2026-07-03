@@ -125,3 +125,46 @@ reverse**. Newest phase last. This is Jared's morning review sheet.
     sheet-active path is unchanged from baseline. Worth a manual pull-to-refresh
     check on device/emulator. Programmatic refresh (Phase 5.1) will call
     `anim_kick()` on show so the spinner ticks even from an idle state.
+    **Update:** now runtime-verified via Task 5.1 below — the programmatic sheet
+    renders its spinner + phrase, confirming the spinner path works with the
+    timeout in place.
+
+### 1.2 + 5.1. `SelectTogglesTheme` setting + Main-card button refresh
+- **What:**
+  - New persisted `SelectTogglesTheme` (default on, key 204). When off, SELECT
+    short/long no longer flips the theme on ordinary cards (no-op). When on,
+    behavior is unchanged for ordinary cards.
+  - **Task 5.1 rides along:** SELECT-short on the **Main** card now triggers a
+    manual weather refresh via a new `refresh_sheet_show_programmatic()` — the
+    only manual-refresh path button-only platforms will have.
+  - Added `refresh_sheet_show_programmatic()` to `refresh_sheet.c`: enters the
+    existing OPENING→LOADING state machine directly (no touch tracking), calls
+    `comm_request_refresh()`, and `anim_kick()`s so the spinner rotates.
+- **Gesture mapping now (per the master-report gesture budget):**
+  - SELECT short: Radar→radar refresh · Settings→row toggle · **Main→weather
+    refresh (unconditional)** · other cards→theme toggle *iff* SelectTogglesTheme.
+  - SELECT long: Settings→no-op · other cards→theme toggle *iff* SelectTogglesTheme
+    (Phase 4 will claim SELECT-long for the detail modal).
+- **Judgment calls:**
+  - **Main SELECT is unconditional refresh**, even when SelectTogglesTheme is on
+    (matches the gesture budget: "Main: manual refresh"). This *changes* the old
+    behavior where SELECT on Main toggled theme. Theme remains reachable via
+    SELECT on other cards (when on) and Clay. Reverse: gate the Main-refresh
+    branch behind `!settings_get_select_toggles_theme()` if you'd rather keep
+    theme-toggle on Main when the setting is on — but that diverges from the
+    documented budget.
+  - **When SelectTogglesTheme is off, freed SELECT gestures are no-ops** (not
+    repurposed yet) except Main-refresh — exactly as Phase 1.2 specifies; Phase 4
+    claims SELECT-long later.
+  - Persist key **204**; Clay decode mirrors the sibling toggle pattern.
+- **Verification (emery emulator):**
+  - SELECT on Main → app log shows `LastUpdated sentinel, fetching weather` +
+    `weather sent`; rapid-capture caught the sheet in LOADING with the three-dot
+    spinner and a status phrase ("Reading the wind…"); banner then reads
+    "UPDATED NOW". ✅ (Also confirms SELECT events reach the app and the spinner
+    animates under the Phase 1.1 timeout.)
+  - SELECT on an ordinary forecast card (default on) → theme flips light↔dark
+    (screenshots). ✅
+  - SelectTogglesTheme off (temporary default flip, reverted) → SELECT on an
+    ordinary card is a byte-identical no-op; Main refresh branch is independent
+    of the setting (code) and unaffected. ✅

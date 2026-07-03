@@ -157,8 +157,21 @@ static void prv_select_click(ClickRecognizerRef r, void *ctx) {
     nav_redraw();
     return;
   }
-  theme_set(theme_get() == THEME_LIGHT ? THEME_DARK : THEME_LIGHT);
-  nav_redraw();
+  // Main card: manual weather refresh (Task 5.1). This is the only manual
+  // refresh path button-only platforms have; on touch models it complements
+  // pull-to-refresh. Unconditional — the freed gesture's assigned future per
+  // the gesture budget.
+  if (strcmp(nav_current_name(), "Main") == 0) {
+    refresh_sheet_show_programmatic();
+    return;
+  }
+  // Ordinary cards: toggle theme only if the user hasn't disabled it
+  // (SelectTogglesTheme, Task 1.2). When off this is a no-op; Phase 4 will
+  // claim SELECT-short for in-modal overlay toggling.
+  if (settings_get_select_toggles_theme()) {
+    theme_set(theme_get() == THEME_LIGHT ? THEME_DARK : THEME_LIGHT);
+    nav_redraw();
+  }
 }
 
 static void prv_select_long(ClickRecognizerRef r, void *ctx) {
@@ -170,8 +183,12 @@ static void prv_select_long(ClickRecognizerRef r, void *ctx) {
   // reaching for UP/DOWN reorder doesn't flip the theme out from under
   // them. Theme is still reachable from every other card and Clay.
   if (strcmp(nav_current_name(), "Settings") == 0) return;
-  theme_set(theme_get() == THEME_LIGHT ? THEME_DARK : THEME_LIGHT);
-  nav_redraw();
+  // Gated by SelectTogglesTheme (Task 1.2). When off, SELECT-long is a no-op
+  // here; Phase 4 claims it to open the forecast detail modal.
+  if (settings_get_select_toggles_theme()) {
+    theme_set(theme_get() == THEME_LIGHT ? THEME_DARK : THEME_LIGHT);
+    nav_redraw();
+  }
 }
 
 static void prv_up_click(ClickRecognizerRef r, void *ctx) {

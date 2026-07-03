@@ -83,6 +83,13 @@ module.exports = [
         "label": "Loop cards at edges",
         "description": "When on, pressing Up on the first card or Down on the last card wraps around the carousel. Turn off to exit the app at the edges, so you can use TouchyWeather as a Quick Launch replacement and leave with the hardware buttons.",
         "defaultValue": true
+      },
+      {
+        "type": "toggle",
+        "messageKey": "SelectTogglesTheme",
+        "label": "SELECT switches theme",
+        "description": "When on, a short or long press of the SELECT (middle) button flips light/dark theme on ordinary cards. Turn off if you keep changing the theme by accident — theme is still switchable here in settings. (SELECT on the main card always refreshes the weather; on Radar it refreshes radar.)",
+        "defaultValue": true
       }
     ]
   },

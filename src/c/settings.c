@@ -7,6 +7,7 @@
 #define KEY_LOOP_NAV           201  // bool: wrap card carousel at edges
 #define KEY_BG_UPDATE_INTERVAL 202  // int: background update interval in seconds
 #define KEY_ANIMATIONS_ENABLED 203  // bool: decorative animation master switch
+#define KEY_SELECT_TOGGLES_THEME 204 // bool: SELECT flips theme on ordinary cards
 #define KEY_TOGGLE_BASE        210  // KEY_TOGGLE_BASE + ToggleId
 #define KEY_CARD_ORDER         220  // SETTINGS_TOGGLEABLE_COUNT bytes
 
@@ -15,6 +16,10 @@ static bool s_loop_nav = true;
 
 // Decorative animation master switch. Default on (preserves current behavior).
 static bool s_animations_enabled = true;
+
+// Whether SELECT toggles theme on ordinary cards. Default on (preserves the
+// reflexive-press behavior users expect today).
+static bool s_select_toggles_theme = true;
 
 // Background update interval in seconds. Default is 0 (disabled, opt-in).
 // 0 = disabled, 1800 = 30 mins, 3600 = 1 hour (recommended when enabled).
@@ -103,6 +108,9 @@ void settings_load(void) {
   if (persist_exists(KEY_ANIMATIONS_ENABLED)) {
     s_animations_enabled = persist_read_bool(KEY_ANIMATIONS_ENABLED);
   }
+  if (persist_exists(KEY_SELECT_TOGGLES_THEME)) {
+    s_select_toggles_theme = persist_read_bool(KEY_SELECT_TOGGLES_THEME);
+  }
   if (persist_exists(KEY_BG_UPDATE_INTERVAL)) {
     int iv = persist_read_int(KEY_BG_UPDATE_INTERVAL);
     // Sanity-guard the persisted interval. A prior build misparsed the
@@ -144,6 +152,15 @@ bool settings_get_animations_enabled(void) {
 void settings_set_animations_enabled(bool enabled) {
   s_animations_enabled = enabled;
   persist_write_bool(KEY_ANIMATIONS_ENABLED, enabled);
+}
+
+bool settings_get_select_toggles_theme(void) {
+  return s_select_toggles_theme;
+}
+
+void settings_set_select_toggles_theme(bool enabled) {
+  s_select_toggles_theme = enabled;
+  persist_write_bool(KEY_SELECT_TOGGLES_THEME, enabled);
 }
 
 bool settings_get_enabled(ToggleId id) {

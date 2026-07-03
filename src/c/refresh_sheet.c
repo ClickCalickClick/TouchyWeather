@@ -380,6 +380,23 @@ bool refresh_sheet_is_active(void) {
   return s_state != REFRESH_IDLE;
 }
 
+void refresh_sheet_show_programmatic(void) {
+  // One overlay at a time: ignore if a sheet (or detail modal, later) is up.
+  if (s_state != REFRESH_IDLE) return;
+  // Enter the same OPENING → LOADING path a committed pull uses, minus the
+  // touch tracking: start closed (y=0) and slide fully open. This gives
+  // button-only platforms (and button users on touch models) identical
+  // spinner/phrase feedback.
+  s_state = REFRESH_OPENING;
+  s_data_received_pending = false;
+  s_claimed_gesture = false;
+  s_pull_dy = 0;
+  s_sheet_y = 0;
+  anim_kick();  // ensure the 10 Hz ticker runs so the spinner rotates
+  comm_request_refresh();
+  prv_start_slide(s_sheet_h);
+}
+
 bool refresh_sheet_on_touchdown(int16_t x, int16_t y) {
   // Lock out any new gesture while non-idle.
   if (s_state != REFRESH_IDLE) {
