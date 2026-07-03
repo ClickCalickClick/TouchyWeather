@@ -12,6 +12,27 @@
 #define UI_HEADER_Y PBL_IF_ROUND_ELSE(24, 8)
 #define UI_HEADER_HEIGHT 24
 
+// --- Font role accessors (Phase 3.1 Stage A) ---
+//
+// Cards fetch their fonts through these accessors instead of calling
+// fonts_get_system_font(FONT_KEY_...) directly. There is exactly one
+// accessor per distinct font the cards use today, so migrating a call
+// site is a pure 1:1 rename with no behaviour change.
+//
+// The point of the indirection is future scaling: Big Mode (Stage B) and
+// the per-screen-class layout work (Phase 5) can swap sizes in ONE place
+// — the body of each accessor — without touching a single call site. Today
+// every accessor returns the exact system font the cards already used, so
+// this layer is a verified no-op (screenshots stay pixel-identical). The
+// FONT_KEY each one wraps is named in the comment; that mapping is the
+// current, protected "Normal" look and must never regress.
+GFont ui_font_header(void);   // GOTHIC_18_BOLD  — card titles + primary values
+GFont ui_font_body(void);     // GOTHIC_24_BOLD  — large body copy (FEELS, quips)
+GFont ui_font_title(void);    // GOTHIC_28_BOLD  — hero titles (clock)
+GFont ui_font_label(void);    // GOTHIC_14_BOLD  — small bold labels / badges
+GFont ui_font_caption(void);  // GOTHIC_14       — muted captions / subtitles
+GFont ui_font_number(void);   // LECO_42_NUMBERS — hero numerals (temp, UV)
+
 typedef enum {
   STATUS_BANNER_RAIN = 0,    // "RAIN IN <m>M" (orange)
   STATUS_BANNER_UPDATED = 1, // "UPDATED <x> AGO" (muted)

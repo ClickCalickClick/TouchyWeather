@@ -4,6 +4,17 @@
 #include <stdio.h>
 #include <time.h>
 
+// --- Font role accessors (Phase 3.1 Stage A) ---
+// One accessor per distinct font in use. Each returns the exact system
+// font the cards used before this refactor; Big Mode / Phase 5 will later
+// branch inside these on scale + screen class, leaving call sites untouched.
+GFont ui_font_header(void)  { return fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD); }
+GFont ui_font_body(void)    { return fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD); }
+GFont ui_font_title(void)   { return fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD); }
+GFont ui_font_label(void)   { return fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD); }
+GFont ui_font_caption(void) { return fonts_get_system_font(FONT_KEY_GOTHIC_14); }
+GFont ui_font_number(void)  { return fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS); }
+
 static void prv_format_ago(uint32_t when, char *out, size_t n) {
   if (!when) { snprintf(out, n, "UPDATED --"); return; }
   uint32_t now = (uint32_t)time(NULL);
@@ -57,7 +68,7 @@ bool ui_draw_status_banner(GContext *ctx, GRect bounds,
 
   graphics_context_set_text_color(ctx, txt_color);
   GRect tr = GRect(r.origin.x + 6, r.origin.y + 2, r.size.w - 12, banner_h - 2);
-  graphics_draw_text(ctx, buf, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
+  graphics_draw_text(ctx, buf, ui_font_label(),
                      tr, GTextOverflowModeTrailingEllipsis,
                      GTextAlignmentCenter, NULL);
   return true;
@@ -84,7 +95,7 @@ void ui_draw_header(GContext *ctx, GRect bounds, const char *text,
   graphics_context_set_text_color(ctx, color);
   GRect tr = GRect(bounds.origin.x, bounds.origin.y + y,
                    bounds.size.w, UI_HEADER_HEIGHT);
-  graphics_draw_text(ctx, text, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+  graphics_draw_text(ctx, text, ui_font_header(),
                      tr, GTextOverflowModeTrailingEllipsis,
                      GTextAlignmentCenter, NULL);
 }
@@ -93,7 +104,7 @@ void ui_draw_card_header_with_icon(GContext *ctx, GRect bounds,
                                    const char *label, GColor color,
                                    int y, int icon_size,
                                    UIIconDrawFn draw_icon) {
-  GFont hf = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  GFont hf = ui_font_header();
   GSize tsize = graphics_text_layout_get_content_size(label, hf,
       GRect(0,0,bounds.size.w, UI_HEADER_HEIGHT),
       GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
