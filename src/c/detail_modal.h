@@ -11,6 +11,8 @@ typedef enum {
   DETAIL_HOURS,   // 6 Hours → temperature trend (SELECT toggles POP overlay)
   DETAIL_PRECIP,  // Precipitation → hourly rainfall amounts
   DETAIL_WEEK,    // Week → one page per day (UP/DOWN page days)
+  DETAIL_UV,      // UV → current gauge + hourly UV curve
+  DETAIL_AQ,      // Air Quality → AQI headline + pollutant breakdown
 } DetailType;
 
 void detail_modal_init(Window *window);

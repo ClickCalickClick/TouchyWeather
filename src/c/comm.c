@@ -53,7 +53,10 @@ static void prv_bg_exit(void *data);
 // Bumped 105 -> 106 when location_name[32] was added to WeatherData
 // (shifts every field after sunset[8]; an old blob would misalign).
 // Bumped 106 -> 107 when show_location bool was added to WeatherData.
-#define PERSIST_KEY_CACHE 107
+// Bumped 107 -> 108 when Phase 4's UV/AQI detail modals added hours_uv[6]
+// + pm2_5/pm10/o3/no2 (shifts nothing before pollen_level, but the struct
+// grew — an old 107 blob would leave the new fields as garbage).
+#define PERSIST_KEY_CACHE 108
 
 static void prv_save_cache(void) {
   WeatherData *d = weather_data_get();
@@ -234,6 +237,10 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
   if ((t = dict_find(iter, MESSAGE_KEY_UV))) { d->uv = t->value->int32; }
   if ((t = dict_find(iter, MESSAGE_KEY_UVMax))) { d->uv_max = t->value->int32; }
   if ((t = dict_find(iter, MESSAGE_KEY_AQI))) { d->aqi = t->value->int32; }
+  if ((t = dict_find(iter, MESSAGE_KEY_PM25))) { d->pm2_5 = t->value->int32; }
+  if ((t = dict_find(iter, MESSAGE_KEY_PM10))) { d->pm10 = t->value->int32; }
+  if ((t = dict_find(iter, MESSAGE_KEY_O3)))   { d->o3 = t->value->int32; }
+  if ((t = dict_find(iter, MESSAGE_KEY_NO2)))  { d->no2 = t->value->int32; }
   if ((t = dict_find(iter, MESSAGE_KEY_Sunrise))) {
     strncpy(d->sunrise, t->value->cstring, sizeof(d->sunrise) - 1);
     d->sunrise[sizeof(d->sunrise) - 1] = '\0';
@@ -297,6 +304,11 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
     MESSAGE_KEY_Hour3Precip, MESSAGE_KEY_Hour4Precip,
     MESSAGE_KEY_Hour5Precip, MESSAGE_KEY_Hour6Precip
   };
+  uint32_t hour_uv_keys[6] = {
+    MESSAGE_KEY_Hour1Uv, MESSAGE_KEY_Hour2Uv,
+    MESSAGE_KEY_Hour3Uv, MESSAGE_KEY_Hour4Uv,
+    MESSAGE_KEY_Hour5Uv, MESSAGE_KEY_Hour6Uv
+  };
   for (int i = 0; i < 6; i++) {
     if ((t = dict_find(iter, hour_label_keys[i]))) {
       strncpy(d->hours_label[i], t->value->cstring,
@@ -322,6 +334,9 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
     }
     if ((t = dict_find(iter, hour_precip_keys[i]))) {
       d->hours_precip_x10[i] = t->value->int32;
+    }
+    if ((t = dict_find(iter, hour_uv_keys[i]))) {
+      d->hours_uv[i] = (uint8_t)t->value->int32;
     }
   }
 

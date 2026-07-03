@@ -85,6 +85,18 @@ typedef struct {
   // grass/tree/weed indexes. -1 means "unknown / not covered" — the
   // air quality card should skip the pollen badge in that case.
   int pollen_level;
+
+  // Phase 4 detail modals (UV TODAY / AIR DETAIL).
+  //   hours_uv[6] — UV index for +1h..+6h, mirroring the 6 Hours window,
+  //                 for the UV modal's hourly curve.
+  //   pm2_5/pm10/o3/no2 — air-quality pollutant concentrations in µg/m³
+  //                 (the US-AQI inputs) for the AIR DETAIL breakdown.
+  //                 0 = missing/unavailable (Open-Meteo field was null).
+  uint8_t hours_uv[6];
+  int pm2_5;
+  int pm10;
+  int o3;
+  int no2;
 } WeatherData;
 
 void weather_data_init_mock(void);

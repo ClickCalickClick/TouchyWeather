@@ -454,3 +454,55 @@ opt-out is explicitly a **later** session (see the Settings-opt-out entry below)
   intermittently and its persist survives restarts (Touch & Go re-enabled itself
   between installs), so card indices shifted mid-test — drove nav one press at a
   time with screenshots to stay oriented. Not a code issue.
+
+### 4.4. UV + Air Quality detail modals — batched WeatherData change (completes 5/5)
+- **What shipped (one commit, one cache bump 107→108):**
+  - **UV → "UV TODAY":** summary line `UV n  LABEL` (orange) + `PEAK m`
+    subtitle, then an **hourly UV curve** (+1h..+6h) drawn as the same
+    segmented trend line as the temp chart, with hour labels. Reuses `uv`,
+    `uv_max`, and the new `hours_uv[6]`.
+  - **Air Quality → "AIR DETAIL":** `AQI n  LABEL` headline in the AQI category
+    color, then a **4-pollutant breakdown** (PM2.5 / PM10 / O3 / NO2) as
+    labelled bars scaled to the largest value + numeric µg/m³, and a caption
+    line that shows `POLLEN: <severity>` when covered else `ug/m3`.
+- **Batched plumbing (the reason UV+AQI were deferred to do together):**
+  - `weather_data.h`: added `uint8_t hours_uv[6]` + `int pm2_5/pm10/o3/no2`.
+  - `PERSIST_KEY_CACHE` **107 → 108** (struct grew; an old blob would leave the
+    new fields as garbage). Single bump for both cards, per the doc's warning
+    not to invalidate the cache twice.
+  - `package.json`: new message keys `PM25/PM10/O3/NO2` + `Hour1Uv..Hour6Uv`.
+  - `comm.c`: decode the new keys (PM* near AQI; `hour_uv_keys[6]` in the
+    existing hourly loop).
+  - `src/pkjs/index.js`: added `uv_index` to the forecast `hourly=` list and
+    `pm2_5,pm10,ozone,nitrogen_dioxide` to the air-quality `current=` list;
+    pack `HourNUv` in the hourly loop and PM25/PM10/O3/NO2 after AQI. Open-Meteo
+    names `ozone`/`nitrogen_dioxide` → shortened to O3/NO2 on the wire.
+- **Judgment calls:**
+  - **Hourly-UV window = the same +1h..+6h as the 6 Hours card** (6 new keys),
+    not a full 24-point day curve (which would be 24 keys and a much bigger
+    message). The gauge summary carries "now" and "peak"; the 6-point curve
+    shows the near-term trend. Honest trade-off; at night the curve reads low,
+    which is correct. Reverse/extend: widen to a day curve later if wanted.
+  - **UV curve has no per-point value annotation** — a first pass annotated the
+    peak point but it collided with the `PEAK n` line at the top of the chart;
+    removed it since the summary already states current UV + peak. The curve is
+    a shape indicator only.
+  - **Pollutant bars scaled to the max of the four** (relative comparison), not
+    to per-pollutant health thresholds — simplest honest "which dominates" read;
+    the numbers give the absolute µg/m³. Bar fill uses the AQI **category
+    color** so severity still reads at a glance.
+  - **`ug/m3` written ASCII**, not `µg/m³` — the Pebble system fonts don't
+    reliably carry `µ`/`³` glyphs (they do carry `°`). Avoids tofu boxes.
+  - AQI category color helper **duplicated locally** in `detail_modal.c`
+    (`prv_aqi_color`) rather than exported from `cards/air_quality.c`, to keep
+    the modules decoupled — same pattern as the other self-contained renderers.
+  - Mock data (`weather_data.c`) seeded with `uv_max=7`, a declining
+    `hours_uv`, and sample pollutants so the modals render pre-refresh.
+- **Verification (emery emulator, screenshots):** UV modal opens on SELECT-long
+  from the UV card — summary `UV 3 MODERATE / PEAK 7`, clean 6-point curve with
+  11–16 hour labels, no collision; BACK returns to the UV card. AQI modal opens
+  from Air Quality — `AQI 38 GOOD` (green), PM2.5=6/PM10=8/O3=93/NO2=1 bars
+  correctly proportioned (O3 full-width), `POLLEN: LOW`; BACK returns to the
+  card. **Live PKJS data actually arrived in the emulator** (real AQI/O3/pollen
+  values, not mock) — so the JS fetch+pack round-trip is confirmed end-to-end,
+  not just syntax-checked. Build green (emery+gabbro), `node --check` clean.

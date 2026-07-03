@@ -357,6 +357,149 @@ static void prv_draw_week(GContext *ctx) {
   }
 }
 
+// UV → current value + qualitative label + PEAK, then an hourly UV curve
+// (+1h..+6h) as a segmented trend line, mirroring the temp-trend renderer.
+static void prv_draw_uv(GContext *ctx) {
+  WeatherData *d = weather_data_get();
+  int top = prv_draw_chrome(ctx, "UV TODAY", icon_draw_sun);
+
+  char sb[24];
+  snprintf(sb, sizeof(sb), "UV %d  %s", d->uv, uv_label(d->uv));
+  graphics_context_set_text_color(ctx, theme_accent_orange());
+  graphics_draw_text(ctx, sb, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+                     GRect(0, top, s_screen_w, 22),
+                     GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+  int y = top + 22;
+  if (d->uv_max > 0) {
+    char pb[16];
+    snprintf(pb, sizeof(pb), "PEAK %d", d->uv_max);
+    graphics_context_set_text_color(ctx, theme_secondary());
+    graphics_draw_text(ctx, pb, fonts_get_system_font(FONT_KEY_GOTHIC_14),
+                       GRect(0, y, s_screen_w, 16),
+                       GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+    y += 16;
+  }
+
+  int margin = UI_MARGIN_X + 6;
+  int label_h = 15;
+  int chart_x = margin;
+  int chart_w = s_screen_w - 2 * margin;
+  int chart_top = y + 10;
+  int chart_bottom = s_sheet_h - label_h - 6;
+  int chart_h = chart_bottom - chart_top;
+  if (chart_h < 20) return;
+
+  int umax = 1;
+  for (int i = 0; i < 6; i++) if (d->hours_uv[i] > umax) umax = d->hours_uv[i];
+
+  int px[6], py[6];
+  for (int i = 0; i < 6; i++) {
+    px[i] = chart_x + (chart_w * i) / 5;
+    py[i] = chart_bottom - (chart_h * d->hours_uv[i]) / umax;
+  }
+  ui_draw_dotted_hline(ctx, chart_x, chart_x + chart_w, chart_bottom + 2,
+                       theme_muted());
+  graphics_context_set_stroke_color(ctx, theme_accent_orange());
+  graphics_context_set_stroke_width(ctx, 3);
+  for (int i = 1; i < 6; i++) {
+    graphics_draw_line(ctx, GPoint(px[i - 1], py[i - 1]), GPoint(px[i], py[i]));
+  }
+  graphics_context_set_fill_color(ctx, theme_accent_orange());
+  for (int i = 0; i < 6; i++) graphics_fill_circle(ctx, GPoint(px[i], py[i]), 3);
+
+  // (No per-point annotation — the summary line already gives current UV +
+  // peak; the curve just communicates the shape/trend.)
+
+  GFont lf = fonts_get_system_font(FONT_KEY_GOTHIC_14);
+  graphics_context_set_text_color(ctx, theme_secondary());
+  int step = (s_screen_w < 160) ? 2 : 1;
+  for (int i = 0; i < 6; i += step) {
+    graphics_draw_text(ctx, d->hours_label[i], lf,
+                       GRect(px[i] - 20, chart_bottom + 4, 40, label_h),
+                       GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+  }
+}
+
+// AQI category color (mirrors card_air_quality's static helper — kept local
+// so the modules stay decoupled).
+static GColor prv_aqi_color(int aqi) {
+  if (aqi <= 50)  return GColorIslamicGreen;
+  if (aqi <= 100) return theme_accent_orange();
+  if (aqi <= 150) return GColorOrange;
+  if (aqi <= 200) return GColorRed;
+  if (aqi <= 300) return GColorPurple;
+  return GColorDarkCandyAppleRed;
+}
+
+// Air Quality → AQI headline + a 4-pollutant breakdown (PM2.5/PM10/O3/NO2)
+// as labelled bars scaled to the largest value, plus a pollen line when the
+// region is covered (else a units caption).
+static void prv_draw_aq(GContext *ctx) {
+  WeatherData *d = weather_data_get();
+  int top = prv_draw_chrome(ctx, "AIR DETAIL", icon_draw_pulse);
+  int margin = UI_MARGIN_X + 6;
+  GColor cat = prv_aqi_color(d->aqi);
+
+  char hb[24];
+  snprintf(hb, sizeof(hb), "AQI %d  %s", d->aqi, aqi_label(d->aqi));
+  graphics_context_set_text_color(ctx, cat);
+  graphics_draw_text(ctx, hb, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+                     GRect(0, top, s_screen_w, 22),
+                     GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+  int y = top + 26;
+
+  const char *names[4] = { "PM2.5", "PM10", "O3", "NO2" };
+  int vals[4] = { d->pm2_5, d->pm10, d->o3, d->no2 };
+  int vmax = 1;
+  for (int i = 0; i < 4; i++) if (vals[i] > vmax) vmax = vals[i];
+
+  GFont nf = fonts_get_system_font(FONT_KEY_GOTHIC_14);
+  GFont vf = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  int row_h = 24;
+  int label_w = 46;
+  int val_w = 38;
+  int bar_x = margin + label_w + 4;
+  int bar_w = s_screen_w - margin - val_w - 4 - bar_x;
+  if (bar_w < 10) bar_w = 10;
+  for (int i = 0; i < 4; i++) {
+    int ry = y + i * row_h;
+    graphics_context_set_text_color(ctx, theme_secondary());
+    graphics_draw_text(ctx, names[i], nf, GRect(margin, ry + 2, label_w, 18),
+                       GTextOverflowModeFill, GTextAlignmentLeft, NULL);
+    int by = ry + 6, bh = 8;
+    graphics_context_set_fill_color(ctx, theme_muted());
+    graphics_fill_rect(ctx, GRect(bar_x, by, bar_w, bh), 2, GCornersAll);
+    int fw = (bar_w * vals[i]) / vmax;
+    if (vals[i] > 0 && fw < 2) fw = 2;
+    graphics_context_set_fill_color(ctx, cat);
+    graphics_fill_rect(ctx, GRect(bar_x, by, fw, bh), 2, GCornersAll);
+    char vb[8]; snprintf(vb, sizeof(vb), "%d", vals[i]);
+    graphics_context_set_text_color(ctx, theme_fg());
+    graphics_draw_text(ctx, vb, vf, GRect(s_screen_w - margin - val_w, ry,
+                                          val_w, 22),
+                       GTextOverflowModeFill, GTextAlignmentRight, NULL);
+  }
+  int fy = y + 4 * row_h + 2;
+
+  // Caption line: pollen severity when covered, otherwise the units.
+  if (d->pollen_level >= 0) {
+    static const char *pw[6] = { "NONE", "VERY LOW", "LOW", "MODERATE",
+                                 "HIGH", "VERY HIGH" };
+    int lvl = d->pollen_level; if (lvl > 5) lvl = 5;
+    char pcap[28];
+    snprintf(pcap, sizeof(pcap), "POLLEN: %s", pw[lvl]);
+    graphics_context_set_text_color(ctx, theme_secondary());
+    graphics_draw_text(ctx, pcap, nf, GRect(margin, fy, s_screen_w - 2 * margin,
+                                            15),
+                       GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+  } else {
+    graphics_context_set_text_color(ctx, theme_muted());
+    graphics_draw_text(ctx, "ug/m3", nf, GRect(margin, fy,
+                                               s_screen_w - 2 * margin, 15),
+                       GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+  }
+}
+
 static void prv_update(Layer *layer, GContext *ctx) {
   (void)layer;
   GRect b = layer_get_bounds(s_layer);
@@ -372,6 +515,8 @@ static void prv_update(Layer *layer, GContext *ctx) {
     case DETAIL_HOURS:  prv_draw_hours(ctx);  break;
     case DETAIL_PRECIP: prv_draw_precip(ctx); break;
     case DETAIL_WEEK:   prv_draw_week(ctx);   break;
+    case DETAIL_UV:     prv_draw_uv(ctx);     break;
+    case DETAIL_AQ:     prv_draw_aq(ctx);     break;
     default: break;
   }
 }

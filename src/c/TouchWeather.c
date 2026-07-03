@@ -153,6 +153,8 @@ static DetailType prv_detail_for_current(void) {
   if (strcmp(n, "6 Hours") == 0) return DETAIL_HOURS;
   if (strcmp(n, "Precipitation") == 0) return DETAIL_PRECIP;
   if (strcmp(n, "Week Ahead") == 0) return DETAIL_WEEK;
+  if (strcmp(n, "UV") == 0) return DETAIL_UV;
+  if (strcmp(n, "Air Quality") == 0) return DETAIL_AQ;
   return DETAIL_NONE;
 }
 

@@ -21,7 +21,17 @@ void weather_data_init_mock(void) {
   s_data.precip[3] = 45;
   s_data.precip[4] = 20;
   s_data.uv = 4;
+  s_data.uv_max = 7;
   s_data.aqi = 42;
+  // Phase 4 UV modal: hourly UV curve (+1h..+6h), a plausible afternoon
+  // decline toward evening.
+  s_data.hours_uv[0] = 6; s_data.hours_uv[1] = 5; s_data.hours_uv[2] = 4;
+  s_data.hours_uv[3] = 3; s_data.hours_uv[4] = 1; s_data.hours_uv[5] = 0;
+  // Phase 4 AIR DETAIL: pollutant concentrations (µg/m³).
+  s_data.pm2_5 = 12;
+  s_data.pm10  = 24;
+  s_data.o3    = 68;
+  s_data.no2   = 18;
   strncpy(s_data.sunrise, "6:14 AM", sizeof(s_data.sunrise));
   strncpy(s_data.sunset, "7:45 PM", sizeof(s_data.sunset));
   strncpy(s_data.location_name, "San Francisco", sizeof(s_data.location_name));

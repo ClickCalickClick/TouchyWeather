@@ -297,7 +297,7 @@ function fetchWeather(lat, lon) {
   var fc = 'https://api.open-meteo.com/v1/forecast' +
     '?latitude=' + lat + '&longitude=' + lon +
     '&current=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,weather_code,wind_speed_10m,wind_direction_10m,uv_index' +
-    '&hourly=temperature_2m,weather_code,precipitation_probability,wind_speed_10m,wind_direction_10m,precipitation' +
+    '&hourly=temperature_2m,weather_code,precipitation_probability,wind_speed_10m,wind_direction_10m,precipitation,uv_index' +
     '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset,uv_index_max' +
     '&temperature_unit=' + tempUnit +
     '&wind_speed_unit=' + windUnit +
@@ -307,7 +307,7 @@ function fetchWeather(lat, lon) {
     '?latitude=' + lat + '&longitude=' + lon +
     // Always request pollen fields. CAMS covers Europe; outside that
     // region the fields return null and we fall back to Google.
-    '&current=us_aqi,grass_pollen,birch_pollen,alder_pollen,ragweed_pollen,mugwort_pollen,olive_pollen' +
+    '&current=us_aqi,pm2_5,pm10,ozone,nitrogen_dioxide,grass_pollen,birch_pollen,alder_pollen,ragweed_pollen,mugwort_pollen,olive_pollen' +
     '&timezone=auto';
 
   // Resolve the city name first (best-effort), then fetch weather so the
@@ -380,6 +380,12 @@ function fetchWeather(lat, lon) {
         // so it agrees with the 6 Hours card's droplets.
         if (aqd && aqd.current) {
           msg.AQI = Math.round(aqd.current.us_aqi || 0);
+          // Phase 4 AIR DETAIL breakdown — pollutant concentrations (µg/m³).
+          // Open-Meteo names ozone/nitrogen_dioxide; we shorten to O3/NO2.
+          msg.PM25 = Math.round(aqd.current.pm2_5 || 0);
+          msg.PM10 = Math.round(aqd.current.pm10 || 0);
+          msg.O3   = Math.round(aqd.current.ozone || 0);
+          msg.NO2  = Math.round(aqd.current.nitrogen_dioxide || 0);
         }
         msg.Units = units === 'metric' ? 1 : 0;
         msg.LastUpdated = Math.floor(Date.now() / 1000);
@@ -396,6 +402,7 @@ function fetchWeather(lat, lon) {
         var hWind  = hourly.wind_speed_10m || [];
         var hWdir  = hourly.wind_direction_10m || [];
         var hPrcp  = hourly.precipitation || [];
+        var hUv    = hourly.uv_index || [];
 
         // Rain alert: first hour (now..+6h) with a *measurable* amount, using
         // the same metric the 6 Hours card uses to draw a droplet
@@ -430,6 +437,8 @@ function fetchWeather(lat, lon) {
           msg['Hour' + hi + 'WindDir'] = degToCompass(hWdir[idx] || 0);
           // Precip amount as integer tenths of in/mm (avoids floats on watch).
           msg['Hour' + hi + 'Precip']  = Math.round((hPrcp[idx] || 0) * 10);
+          // UV index (integer) for the UV modal's hourly curve.
+          msg['Hour' + hi + 'Uv']      = Math.round(hUv[idx] || 0);
         }
 
         // Phase 10B: Week Ahead (today + next 4 days = 5 total).
