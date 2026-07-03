@@ -506,3 +506,30 @@ opt-out is explicitly a **later** session (see the Settings-opt-out entry below)
   card. **Live PKJS data actually arrived in the emulator** (real AQI/O3/pollen
   values, not mock) — so the JS fetch+pack round-trip is confirmed end-to-end,
   not just syntax-checked. Build green (emery+gabbro), `node --check` clean.
+
+### 4.5. Swipe-up opens the detail modal (touch models) — Jared's step-6 request
+- **What:** On emery/gabbro, an **upward swipe** on a forecast card now opens
+  that card's detail modal — a touch shortcut for SELECT-long. Mirrors the
+  existing "swipe down = refresh" so the two vertical gestures are symmetric
+  (Jared: *"we swipe down already for refresh, swipe up for extended data
+  modals"*). No-op on cards without a modal. Drag-down still dismisses an open
+  modal; horizontal swipe still navigates.
+- **Where:** `TouchWeather.c touch_handler` Liftoff — a new branch
+  `dy < 0 && ady > VSWIPE_THRESHOLD(30) && ady > adx` between the horizontal-swipe
+  and tap branches (mutually exclusive with both: `adx>ady` vs `ady>adx`). Calls
+  the already-wired `prv_detail_for_current()` → `detail_modal_open()`. A forward
+  decl of `prv_detail_for_current` was added (it's defined below the `#if
+  ENABLE_TOUCH` block).
+- **Why it's safe by construction:** pull-DOWN is consumed by `refresh_sheet`
+  earlier in Liftoff, and a swipe while a modal is already open is caught by the
+  `detail_modal_is_active()` branch at the top of Liftoff (drag-down dismiss) —
+  so an upward flick only reaches the new branch when no overlay is active. All
+  the same guards the SELECT-long path uses.
+- **Verification — build green (emery+gabbro); NOT runtime-tested.** The emulator
+  has **no scriptable touchscreen swipe** (`pebble emu-button` is buttons only;
+  `emu-tap` is the accelerometer; `emu-control` is interactive-GUI only) — the
+  same gap prior sessions noted for pull-to-refresh and touch long-press. The
+  branch reuses the proven horizontal-swipe structure and the SELECT-long-verified
+  `detail_modal_open`, so risk is low, but **confirm the up-swipe on real
+  emery/gabbro hardware** before release. Reverse: delete the branch + forward
+  decl.

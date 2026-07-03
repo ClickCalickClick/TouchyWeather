@@ -67,6 +67,9 @@ static bool s_tracking = false;
 static int16_t s_start_x = 0;
 static int16_t s_start_y = 0;
 
+// Defined below; the touch handler's swipe-up shortcut needs it early.
+static DetailType prv_detail_for_current(void);
+
 static void touch_handler(const TouchEvent *event, void *context) {
   (void)context;
   switch (event->type) {
@@ -124,11 +127,22 @@ static void touch_handler(const TouchEvent *event, void *context) {
       int16_t adx = dx < 0 ? -dx : dx;
       int16_t ady = dy < 0 ? -dy : dy;
       const int16_t HSWIPE_THRESHOLD = 30;
+      const int16_t VSWIPE_THRESHOLD = 30;
       const int16_t TAP_THRESHOLD = 15;
       if (adx > HSWIPE_THRESHOLD && adx > ady) {
         // Horizontal swipe = card nav.
         if (dx < 0) nav_next();
         else        nav_prev();
+      } else if (dy < 0 && ady > VSWIPE_THRESHOLD && ady > adx) {
+        // Swipe up = open the current card's detail modal (touch shortcut for
+        // SELECT-long; drag-down still dismisses). Pull-DOWN is owned by the
+        // refresh sheet and handled above, so only an upward flick lands here.
+        // No-op on cards without a modal. (Phase 4, requested on touch models.)
+        DetailType dt = prv_detail_for_current();
+        if (dt != DETAIL_NONE) {
+          anim_kick();
+          detail_modal_open(dt);
+        }
       } else if (adx < TAP_THRESHOLD && ady < TAP_THRESHOLD) {
         // Tap (small movement). On the Settings card, advance the
         // row cursor. Elsewhere we ignore taps for now.
