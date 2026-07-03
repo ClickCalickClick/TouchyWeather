@@ -76,8 +76,15 @@ bool ui_draw_status_banner(GContext *ctx, GRect bounds,
   // Sit above page indicator. On round we keep clear of the bottom arc.
   // Lowered (smaller pad) so the pill sits where the main card's down-nudged
   // layout placed it — round 40→35 (-5), rect 22→20 (-2) — keeping the pill
-  // position uniform across every card.
+  // position uniform across every card. On the small-round (chalk 180) class
+  // the gabbro-tuned 35px pad pushes the pill into the middle of the content
+  // (it overlapped the 17:00 row on 6 Hours), so hug the bottom arc tighter
+  // there to reclaim a row of vertical space. Large classes unchanged.
+#if defined(UI_SCREEN_SMALL_ROUND)
+  int pad_bottom = 18;
+#else
   int pad_bottom = PBL_IF_ROUND_ELSE(35, 20);
+#endif
   int banner_h = 22;
   int banner_w = PBL_IF_ROUND_ELSE(140, 130);
   GRect r = GRect(bounds.origin.x + (bounds.size.w - banner_w) / 2,

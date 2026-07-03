@@ -19,6 +19,7 @@
     ],
     "targetPlatforms": [
       "basalt",
+      "chalk",
       "emery",
       "gabbro"
     ],
