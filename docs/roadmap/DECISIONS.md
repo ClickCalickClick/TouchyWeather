@@ -1001,3 +1001,123 @@ data guard, so it intentionally changes emery/gabbro **in the bad-data case only
   spotless. Add the Normal/Big **scale axis** inside the same accessor bodies
   that carry the screen-class axis; prove on one or two spots (emery/gabbro
   byte-identical with Big off, one small platform renders Big right) then spread.
+
+## Phase 3.1 Stage B — Big Mode: mechanism + first two cards (2026-07-03, night)
+
+Resumed on `feature/roadmap-phases`. Jared set this session on **Big Mode**, the
+last big roadmap item. Three scope decisions up front (AskUserQuestion):
+**(1)** the per-card Big-Mode *content* was designed by a **Fable subagent**
+(planning only — see the plan captured below), **(2)** high contrast is an
+**override flag** on the existing light/dark modes (not a third theme mode), and
+**(3)** land the **mechanism + prove on 2 cards** (Main + 6 Hours), then STOP for
+review before spreading to the other 10. **4 commits** (plumbing, mechanism,
+Main, 6 Hours) + this entry, tree clean, `pebble build` green for all 6,
+**nothing pushed**.
+
+### The load-bearing difference from Phase 5: Big Mode is RUNTIME, not compile-time
+The screen-class axis is resolved with `#if defined(UI_SCREEN_*)`, so emery/gabbro
+compiled byte-for-byte identical and `cmp` past the 168-byte header was the safety
+net. **Big Mode is a runtime toggle** (`settings_get_big_mode()` read on the draw
+path), so a real branch exists in the binary and the `cmp` net **no longer
+applies**. The invariant shifts to: **with Big Mode OFF, every platform renders
+pixel-identical to pre-Stage-B.** That holds *by construction* — every accessor's
+else-path and every card's pre-branch code is the verbatim prior code, and the
+Big paths are `if (big) {…}` / early-returns — and was **confirmed by screenshot**
+(emery Big-OFF Main+6 Hours returned the verbatim LECO/FEELS/wind and dense 6-row
+layouts).
+
+### B1. BigMode setting plumbing (commit 1) — no visual change
+- Mirror of the `AnimationsEnabled` pattern end-to-end: `settings.c/.h` getter+
+  setter on **persist key 207** (reserved for BigMode by the 2.2 key map),
+  `comm.c` decode (int or CSTRING) that calls `s_update_cb()` for an immediate
+  repaint, `BigMode` message key in `package.json`, and a Clay toggle in
+  `config.js`. Default **off**. No `WeatherData` change → **no cache bump**.
+
+### B2. Scale axis in the accessors + high-contrast override (commit 2) — the mechanism
+- **`ui.c` — third axis in the accessor bodies.** Each `ui_font_*()` gains a
+  `settings_get_big_mode()` branch bumping the role one tier (per the Fable map
+  below), holding the two SMALL screen classes at the Normal tier for
+  header/body where a bigger font wouldn't fit 144/180px. The status pill grows
+  (`banner_h` 22→28, +20 wide) so the enlarged label fits.
+- **Hero-numeral font — DEVIATION from Fable (chose `BITHAM_42_BOLD`, not
+  `ROBOTO_BOLD_SUBSET_49`).** Fable specced ROBOTO_49 (49px, +7px) with a
+  BITHAM fallback for negative temps. But ROBOTO_BOLD_SUBSET_49 is a *clock*
+  subset (digits+colon) whose **degree glyph is unverified**, and the main-card
+  temp is `"72°"`. `BITHAM_42_BOLD` is a **full font** — it carries both `°` and
+  `-`, so no tofu and **no per-sign fallback needed** (dissolves Fable's whole
+  minus-glyph special case). Cost: 42px vs 49px; the readability win in Big Mode
+  comes mostly from the simplified layouts. **Verified live** on emery/gabbro/
+  basalt that `"72°"` renders with a clean degree glyph. Reverse/revisit: swap
+  the one line in `ui_font_number()`'s big branch if 49px is wanted (then
+  reinstate a `< 0` fallback for the main temp).
+- **`theme.c` high-contrast override (the flag, per scope choice 2).**
+  `theme_secondary()` and the three accents collapse to full-contrast `theme_fg()`
+  when Big Mode is on — same collapse the `PBL_BW` fallback already does, and the
+  Big layouts carry meaning by **shape** (↑/↓ arrows, distinct icons). **Refinement
+  of Fable's plan:** `theme_muted()` is deliberately **NOT** collapsed — it drives
+  the inactive page-indicator dots, which must stay distinct from the fg active
+  dot. A card that needs a hue to *be* the data (AQI category color) can opt back
+  out locally when its Big layout lands.
+
+### B3 + B4. Main + 6 Hours simplified Big layouts (commits 3, 4)
+- **Main:** icon + huge centered temp + one `↑high ↓low` line; drops location/
+  FEELS/wind+humidity. **6 Hours:** 3 rows sampling hours {0,2,4} (spans the full
+  window), time + icon + temp only; drops the wind + precip columns and the odd
+  hours (all still in the detail modal); header `6 HOURS`→`HOURLY`. Both are
+  early-return branches keyed off `settings_get_big_mode()`, per-screen-class
+  metrics, verbatim Normal path below.
+- **Verified (emulator, temp default-flip to true then reverted):** Big-ON renders
+  correctly on **emery (large-rect) + gabbro (large-round)** (phase-doc mandate)
+  **and basalt (small-rect 144×168)** — no clipping, degree glyph clean, pill
+  enlarged; the un-redesigned cards (e.g. Touch & Go) just show bigger fonts in
+  their old layout, as expected mid-sweep. Big-OFF returned verbatim on emery.
+
+### The Fable Big-Mode plan for the REMAINING 10 cards (spread from here)
+Captured so the next session doesn't re-run Fable. Content policy: *maximize font/
+object size, fewer elements, high contrast*. **Big-Mode `ui_font_*` map** (already
+implemented in B2): header→24B(large)/18B(small), body→28B(large)/24B(small),
+title→BITHAM_30_BLACK, label→18B, caption→14B, number→BITHAM_42_BOLD.
+Per card (RETAIN → CUT, cut data lives in the detail modal unless noted):
+- **Week** *(simplified — near-mechanical copy of 6 Hours)*: 3 days small / 5 large,
+  `day + icon + ↑high ↓low`; cut POP% + days 4–5-on-small (→ modal). Arrows replace
+  the hue-coded high/low.
+- **Precipitation** *(simplified)*: 3 fat bars (Now/+2h/+4h) with % above + hour
+  below; cut +1h/+3h (→ modal).
+- **Golden Hour** *(simplified)*: **2 gold rows only** (AM/PM) at 28B. **CUT the two
+  BLUE-hour rows entirely — NO modal fallback (data is gone).** ⚠️ product call.
+- **UV** & **Air Quality** *(font-bump/trim, twins)*: **drop the arc gauge**, giant
+  number (BITHAM_42_BOLD) + qualitative label (28B); PEAK/pollen line on large only.
+  AQI keeps its **category color** (the one hue that IS data) — opt back out of the
+  contrast collapse locally.
+- **Sun Cycle** *(font-bump)*: both rows, BITHAM_30_BLACK times, bigger icons;
+  SUNRISE/SUNSET word captions on large only.
+- **Night Sky** *(trim)*: bigger moon + phase name (28B/24B); cut "% LIT"; **drop the
+  status banner on this card** to fit. Moon's locked cream/navy palette is **exempt**
+  from the contrast collapse (shadow direction = the data). ⚠️ banner drop.
+- **Advice/Touch & Go** *(trim)*: promote the data headline to 28B, keep the quip
+  (24B); cut the tier badge and **drop the status banner** for room; may need a
+  short-phrase audit (~≤35 chars) on small classes. ⚠️ banner drop.
+- **Radar** *(exempt face)*: bitmap unchanged, bigger crosshair + state text; Fable
+  **recommends auto-hiding Radar from the Big-Mode rotation** (irreducible hue
+  detail — antithesis of the policy; the visibility machinery exists). ⚠️ product call.
+- **Settings** *(exempt)*: unchanged in Big Mode — 12 rows can't scale without a
+  scrolling cursor (disproportionate lift for a rarely-visited management screen).
+
+### ⚠️ Product-level cuts to CONFIRM WITH JARED before spreading
+None touch Main/6 Hours, so they're deferred to the spread session, but they
+remove data with no fallback and should be his call:
+1. **Golden Hour** drops the two BLUE-hour rows entirely (no modal exists).
+2. **Night Sky** and **Advice** drop the status banner (rain-alert reachability).
+3. **Radar** hidden from the Big-Mode rotation (a visibility policy change).
+
+### Still open / next
+- **Spread Big Mode to the other 10 cards** per the Fable plan above — Week +
+  Precipitation first (simplified, mechanical from 6 Hours), then the font-bump/
+  trim cards, resolving the three ⚠️ product cuts with Jared first.
+- Same carry-over discipline: prove each card Big-ON on emery + gabbro (+ a small
+  class), confirm Big-OFF stays pixel-identical (screenshot, not `cmp`), one
+  commit per card. Codegen gotcha still applies to the Normal path (inline fonts
+  via `#if`, don't hoist a verbatim-path value into a shared local).
+- **Everything still rides the unmerged branch** — Phase 4 + Phase 5 hardware
+  sign-off still gates the merge; Big Mode adds its own hardware-pass item
+  (legibility/contrast on a real low-vision pass, and the enlarged pill on device).
