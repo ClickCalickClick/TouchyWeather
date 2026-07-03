@@ -41,8 +41,14 @@ void card_uv_draw(GContext *ctx, GRect bounds) {
   graphics_context_set_fill_color(ctx, theme_muted());
   graphics_fill_radial(ctx, arc_box, GOvalScaleModeFitCircle, thickness,
                        DEG_TO_TRIGANGLE(-90), DEG_TO_TRIGANGLE(90));
+  // UV index is physically 0+; guard a negative/unknown live value. The LECO
+  // hero font has no minus glyph (a negative UV drew a tofu box), and a
+  // negative value would also sweep the gauge backwards. Clamp to >=0 so the
+  // hero, gauge, and label all read "0 / LOW" on bad data instead of breaking.
+  int uv = d->uv < 0 ? 0 : d->uv;
+
   // Foreground proportion: uv 0..11 over 180°.
-  int uv_capped = d->uv > 11 ? 11 : d->uv;
+  int uv_capped = uv > 11 ? 11 : uv;
   int sweep_deg = (uv_capped * 180) / 11;
   graphics_context_set_fill_color(ctx, theme_accent_orange());
   graphics_fill_radial(ctx, arc_box, GOvalScaleModeFitCircle, thickness,
@@ -56,7 +62,7 @@ void card_uv_draw(GContext *ctx, GRect bounds) {
 #else
   int num_top = c.y - 32, num_h = 50, label_dy = 18, peak_dy = 38;
 #endif
-  char buf[8]; snprintf(buf, sizeof(buf), "%d", d->uv);
+  char buf[8]; snprintf(buf, sizeof(buf), "%d", uv);
   graphics_context_set_text_color(ctx, theme_fg());
   graphics_draw_text(ctx, buf,
       ui_font_number(),
@@ -64,7 +70,7 @@ void card_uv_draw(GContext *ctx, GRect bounds) {
       GTextOverflowModeFill, GTextAlignmentCenter, NULL);
 
   // Label below.
-  graphics_draw_text(ctx, uv_label(d->uv),
+  graphics_draw_text(ctx, uv_label(uv),
       ui_font_header(),
       GRect(ox, c.y + label_dy, W, 24),
       GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
