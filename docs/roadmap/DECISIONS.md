@@ -6,6 +6,55 @@ reverse**. Newest phase last. This is Jared's morning review sheet.
 
 ---
 
+## ☀️ MORNING SUMMARY (read this first)
+
+Branch `feature/roadmap-phases`, **8 local commits** on top of the roadmap docs,
+**never pushed**. Tree clean, `pebble build` green (emery + gabbro) at HEAD.
+Every commit was screenshot-verified on the emery emulator.
+
+**Done (in execution order):**
+| Phase | What | Notes |
+|---|---|---|
+| 0 | Theme persistence consolidated onto key 1 | Secret cleanup **waived** per your instruction |
+| 1.1 | Animation idle-timeout + `AnimationsEnabled` | ~8 s freeze, ticker stops when idle |
+| 1.2 + 5.1 | `SelectTogglesTheme` + Main-card button refresh | SELECT-on-Main = refresh |
+| 2.1 | **FALLBACK** — Settings stays terminal card | ⚠️ long-press BACK is undeliverable on this SDK; see 2.1 |
+| 2.2 | Opt-in Clay card visibility (`PhoneManagesCards`) | default off, avoids wiping on-watch config |
+| 3.2 | Opt-in auto-hide Precip+Radar when dry | hysteresis + fail-open guardrails |
+| 4 | **PARTIAL** — detail modals for 6 Hours + Precipitation | Week/UV/AQI deferred |
+
+**Biggest things to review (⚠️):**
+1. **2.1 overrode your decision.** Long-press BACK for Settings can't be
+   implemented on this SDK/emulator (long-click and raw-click on BACK never
+   fire — verified 3 ways; only short-click works). I fell back to keeping
+   Settings as the terminal card (the phase doc's sanctioned runner-up) after a
+   `fable` consult. **Please verify on real hardware** whether raw BACK events
+   arrive — if so, the raw-timer approach can be reinstated. Full chain in 2.1.
+2. **Phase 4 is partial** (2 of 5 forecast modals). Week/UV/AQI deferred; UV+AQI
+   need one batched `WeatherData` change + cache-key bump (107→108). See Phase 4.
+3. Several features are **opt-in / default-off** (Clay card control, auto-hide) —
+   deliberate, so nothing changes for existing users until they opt in.
+
+**Not started (large, left for you / a future run):** Phase 3.1 Stage A (the
+ui-metrics/font accessor refactor across all 12 cards), Phase 5 (7-platform
+expansion — `targetPlatforms` still `["emery","gabbro"]`), Phase 3.1 Stage B
+(Big Mode). These are the roadmap's heavy items; the master-report dependency
+graph has Stage A before Phase 5 before Big Mode.
+
+**User action items (can't be autopiloted):**
+- **Radar-proxy key:** you said keep it embedded / don't rotate — done nothing, as
+  instructed.
+- **Emulator env:** I installed `libpng` via Homebrew to boot the emulator (E1)
+  and left the emery emulator's persisted app-state dirty from testing (some
+  cards user-disabled). Delete `~/Library/Application Support/Pebble SDK/4.9.169/
+  emery/qemu_spi_flash.bin` for a clean slate, or just re-enable cards on-watch.
+- **Before release:** add a "What's New" changelog line if you want to announce
+  any of this; run the app on real hardware to confirm the SELECT/BACK behaviors
+  (emulator input has quirks — see E2 + 2.1).
+- Review this file, then decide what to push / PR.
+
+---
+
 ## Environment / setup
 
 ### E1. Emulator libpng dependency (I installed `libpng` via Homebrew) — FYI
