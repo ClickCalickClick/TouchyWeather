@@ -2,6 +2,7 @@
 #include "../theme.h"
 #include "../icons.h"
 #include "../ui.h"
+#include "../settings.h"
 #include "../weather_data.h"
 #include "../anim.h"
 #include <stdio.h>
@@ -15,6 +16,70 @@ void card_main_draw(GContext *ctx, GRect bounds) {
   // be horizontally offset. Translate every X coordinate by ox so the
   // entire card moves as one rigid unit during the slide.
   int ox = bounds.origin.x;
+
+  // --- Big Mode (Stage B): simplified "fewer, bigger elements" main card. ---
+  // Condition icon + a huge centered temperature + one hi/lo line (↑high ↓low).
+  // Location, FEELS and the wind/humidity split row are dropped for legibility
+  // (FEELS is on the Advice card; wind lives in the 6 Hours detail). The arrows
+  // carry the hi-vs-lo meaning since the accent colors collapse to fg in Big
+  // Mode. Returns early, so the entire Normal layout below is untouched and
+  // Big-OFF stays pixel-identical.
+  if (settings_get_big_mode()) {
+    int icon_size, icon_y, temp_y, hilo_y;
+#if defined(UI_SCREEN_SMALL_RECT)
+    icon_size = 40; icon_y = 4;  temp_y = 46;  hilo_y = 96;
+#elif defined(UI_SCREEN_SMALL_ROUND)
+    icon_size = 46; icon_y = 10; temp_y = 54;  hilo_y = 104;
+#elif defined(UI_SCREEN_LARGE_RECT)
+    icon_size = 60; icon_y = 18; temp_y = 74;  hilo_y = 138;
+#else  // UI_SCREEN_LARGE_ROUND
+    icon_size = 68; icon_y = 34; temp_y = 100; hilo_y = 168;
+#endif
+    // Condition icon, centered near the top.
+    icon_draw_condition_animated(ctx, GPoint(ox + W / 2, icon_y + icon_size / 2),
+                                 icon_size, d->condition, anim_get_frame());
+    // Huge temperature, centered. ui_font_number() -> BITHAM_42_BOLD in Big Mode
+    // (a full font, so the degree glyph and a sub-zero minus both render).
+    char temp_buf[8];
+    snprintf(temp_buf, sizeof(temp_buf), "%d°", d->temp);
+    graphics_context_set_text_color(ctx, theme_fg());
+    graphics_draw_text(ctx, temp_buf, ui_font_number(),
+                       GRect(ox, temp_y, W, 50),
+                       GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+    // One hi/lo line: ↑high  ↓low, centered as a cluster.
+    GFont hilo_font = ui_font_body();
+    char hi_buf[8], lo_buf[8];
+    snprintf(hi_buf, sizeof(hi_buf), "%d°", d->high);
+    snprintf(lo_buf, sizeof(lo_buf), "%d°", d->low);
+    GSize hi_sz = graphics_text_layout_get_content_size(hi_buf, hilo_font,
+        GRect(0, 0, W, 40), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+    GSize lo_sz = graphics_text_layout_get_content_size(lo_buf, hilo_font,
+        GRect(0, 0, W, 40), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+    int arrow = (icon_size >= 60) ? 16 : 12;
+    int ag = 4;          // arrow -> its number
+    int group_gap = 16;  // high group -> low group
+    int th = (icon_size >= 60) ? 34 : 28;  // hi/lo text box height
+    int hi_group_w = arrow + ag + hi_sz.w;
+    int lo_group_w = arrow + ag + lo_sz.w;
+    int cluster_w = hi_group_w + group_gap + lo_group_w;
+    int cx = ox + (W - cluster_w) / 2;
+    int arrow_cy = hilo_y + th / 2 - 2;
+    graphics_context_set_text_color(ctx, theme_fg());
+    icon_draw_arrow_up(ctx, GPoint(cx + arrow / 2, arrow_cy), arrow, theme_fg());
+    graphics_draw_text(ctx, hi_buf, hilo_font,
+        GRect(cx + arrow + ag, hilo_y, hi_sz.w + 4, th),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+    int lx = cx + hi_group_w + group_gap;
+    icon_draw_arrow_down(ctx, GPoint(lx + arrow / 2, arrow_cy), arrow, theme_fg());
+    graphics_draw_text(ctx, lo_buf, hilo_font,
+        GRect(lx + arrow + ag, hilo_y, lo_sz.w + 4, th),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+    // Status banner (enlarged for Big Mode inside ui_draw_status_banner).
+    ui_draw_auto_banner(ctx, bounds, d->rain_alert_min, d->last_updated,
+                        anim_get_frame());
+    return;
+  }
+
   // Nudge the main-card layout down. `yshift` is the base shift applied to
   // the whole card; round (Gabbro) adds further tiers on top.
   //   yshift     — base for the bottom group (wind/humidity row + banner)
