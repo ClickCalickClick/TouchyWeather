@@ -168,3 +168,54 @@ reverse**. Newest phase last. This is Jared's morning review sheet.
   - SelectTogglesTheme off (temporary default flip, reverted) → SELECT on an
     ordinary card is a byte-identical no-op; Main refresh branch is independent
     of the setting (code) and unaffected. ✅
+
+---
+
+## Phase 2 — Navigation Refactor & Clay Migration
+
+### 2.1. Long-press BACK for Settings — NOT IMPLEMENTED; fell back to Settings-as-terminal-card (⚠️ overrides a user decision — please review)
+- **Decision:** Kept Settings as the last card in the up/down rotation (the
+  existing/baseline behavior). Did **not** remove it from rotation and did
+  **not** wire long-press BACK. This is the phase doc's sanctioned runner-up.
+  Net code change for 2.1: **none** (this DECISIONS entry only).
+- **Why — long-press BACK is undeliverable on this SDK 4.9.169 emulator (verified, full chain):**
+  1. `window_long_click_subscribe(BUTTON_ID_BACK, 500, …)` — long handler
+     **never fires**; holding BACK 800 ms just exits the app. The same
+     push/hold/release fires `SELECT` long-click fine, so it's BACK-specific.
+  2. `window_raw_click_subscribe(BUTTON_ID_BACK, down, up, …)` — raw down/up
+     **also never fire**; a long BACK still exits. (Tried per the `fable`
+     consult below, to bypass the click recognizer.)
+  3. Only `window_single_click_subscribe(BUTTON_ID_BACK, …)` fires — on
+     *release*, with no press event, so hold duration can't be measured.
+  4. `window_single_repeating_click_subscribe` could detect a hold, but
+     confirming short-vs-hold would delay the short-press exit — which the user
+     explicitly forbade ("no added latency to single-BACK exit").
+  ⇒ No way to implement long-press BACK here without an undelivered event or
+     added exit latency. Firmware consumes BACK for app-exit before the app
+     sees a long/raw event.
+- **Escalation (tier-2):** This overrides the user's explicit 2026-07-03
+  decision (long-press BACK; double-tap rejected), so I ran a synchronous
+  `fable` consult. Tiebreak: try `window_raw_click_subscribe` first; if raw is
+  also dead, take the fallback (Settings terminal card) and log the chain. Raw
+  was dead → fallback taken. Fable also flagged: never ship an
+  unverifiable-on-hardware gesture as the *only* route to Settings (lockout
+  risk) — which is why I reverted the dead long-BACK code rather than leaving it
+  in (in the emulator it left Settings unreachable).
+- **Cost:** Phase 2.1's goal ("up/down scrolling is purely weather") is not
+  achieved — Settings still appears last in the carousel (master report notes
+  this is only mildly disruptive since it's pinned last, not interleaved).
+  Phase 4's real dependency was the freed SELECT-long gesture (delivered in 1.2),
+  not this — so **Phase 4 is not blocked**. Phase 2.2 (Clay visibility sync) is
+  independent of rotation and proceeds.
+- **For Jared — decide:**
+  1. **Verify on real hardware.** The emulator may not emulate BACK long/raw
+     even if hardware delivers it. If a real Pebble delivers raw BACK events,
+     reinstate the raw-timer approach (I wrote then reverted it; see this
+     commit's parent diff / git history): raw-down starts a 500 ms `app_timer`;
+     timer-fires-while-held → open Settings; raw-up → if not consumed, exit.
+     Plus `nav_set_enabled(11,false)`, drop Settings from
+     `prv_sync_nav_traversal`, and skip the page indicator on a current-disabled
+     card in `nav.c`.
+  2. If long-BACK can't work on hardware either: keep terminal card (current),
+     or revisit double-tap BACK (you rejected it, but it *is* deliverable). I did
+     not re-litigate your double-tap rejection.
