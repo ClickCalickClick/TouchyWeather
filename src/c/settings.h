@@ -124,3 +124,24 @@ ToggleId settings_visual_id(int visual_pos);
 // a swap occurred.
 bool settings_move_up(int visual_pos);
 bool settings_move_down(int visual_pos);
+
+// Visible toggleable rows on the Settings card. On radar-capable platforms
+// this is identical to the full toggleable set. On carved-out platforms the
+// radar row is filtered out of the visible list (radar is force-disabled
+// there, so an on-screen RADAR checkbox would be inert) — the cursor, reorder
+// and row draw all operate in this radar-free "visible" space. The underlying
+// size-10 arrays and persist keys stay full on every platform so a user's
+// settings survive roaming across watches.
+int settings_visible_count(void);
+ToggleId settings_visible_id(int visible_pos);
+
+// Card + input handlers select the visible view on carved-out platforms and
+// the verbatim full view where radar is supported. The radar-capable branch
+// expands to the exact original tokens so emery/gabbro compile byte-identical.
+#if defined(TW_RADAR_SUPPORTED)
+#  define SETTINGS_VIS_COUNT SETTINGS_TOGGLEABLE_COUNT
+#  define SETTINGS_VIS_ID(i) settings_visual_id(i)
+#else
+#  define SETTINGS_VIS_COUNT settings_visible_count()
+#  define SETTINGS_VIS_ID(i) settings_visible_id(i)
+#endif

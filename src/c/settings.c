@@ -85,6 +85,34 @@ ToggleId settings_visual_id(int visual_pos) {
   return (ToggleId)s_visual_order[visual_pos];
 }
 
+// --- Visible (radar-filtered) view of the toggleable rows ------------------
+// On radar-capable platforms the visible view IS the full view. On carved-out
+// platforms radar is filtered out wherever it currently sits in the visual
+// order, so the Settings card shows 9 rows and the cursor/reorder never land
+// on the inert radar entry.
+#if defined(TW_RADAR_SUPPORTED)
+int settings_visible_count(void) { return SETTINGS_TOGGLEABLE_COUNT; }
+ToggleId settings_visible_id(int visible_pos) { return settings_visual_id(visible_pos); }
+#else
+int settings_visible_count(void) { return SETTINGS_TOGGLEABLE_COUNT - 1; }
+
+// s_visual_order index of the visible_pos-th non-radar row (-1 if none).
+static int prv_visual_index_of_visible(int visible_pos) {
+  int seen = 0;
+  for (int i = 0; i < SETTINGS_TOGGLEABLE_COUNT; ++i) {
+    if (s_visual_order[i] == TOGGLE_RADAR) continue;
+    if (seen == visible_pos) return i;
+    seen++;
+  }
+  return -1;
+}
+
+ToggleId settings_visible_id(int visible_pos) {
+  int idx = prv_visual_index_of_visible(visible_pos);
+  return idx < 0 ? TOGGLE_HOURS : (ToggleId)s_visual_order[idx];
+}
+#endif
+
 static bool s_enabled[SETTINGS_TOGGLEABLE_COUNT] = {
   true, true, true, true, true, true, true, true, true, true
 };
@@ -238,9 +266,14 @@ const char *settings_label(ToggleId id) {
 int settings_cursor(void) { return s_cursor; }
 
 void settings_cursor_advance(void) {
+#if defined(TW_RADAR_SUPPORTED)
   s_cursor = (s_cursor + 1) % SETTINGS_TOGGLEABLE_COUNT;
+#else
+  s_cursor = (s_cursor + 1) % (SETTINGS_TOGGLEABLE_COUNT - 1);
+#endif
 }
 
+#if defined(TW_RADAR_SUPPORTED)
 bool settings_move_up(int visual_pos) {
   if (visual_pos <= 0 || visual_pos >= SETTINGS_TOGGLEABLE_COUNT) return false;
   uint8_t tmp = s_visual_order[visual_pos - 1];
@@ -260,3 +293,40 @@ bool settings_move_down(int visual_pos) {
   prv_persist_order();
   return true;
 }
+#else
+// Reorder in the radar-free visible space: swap the moved visible card with
+// its nearest visible neighbor in s_visual_order, stepping over the hidden
+// radar entry if it sits between them. Radar keeps its slot, so its relative
+// position among the hidden set is preserved while the two visible cards swap.
+bool settings_move_up(int visible_pos) {
+  int idx = prv_visual_index_of_visible(visible_pos);
+  if (idx < 0) return false;
+  int prev = -1;
+  for (int i = idx - 1; i >= 0; --i) {
+    if (s_visual_order[i] != TOGGLE_RADAR) { prev = i; break; }
+  }
+  if (prev < 0) return false;
+  uint8_t tmp = s_visual_order[prev];
+  s_visual_order[prev] = s_visual_order[idx];
+  s_visual_order[idx] = tmp;
+  s_cursor = visible_pos - 1;
+  prv_persist_order();
+  return true;
+}
+
+bool settings_move_down(int visible_pos) {
+  int idx = prv_visual_index_of_visible(visible_pos);
+  if (idx < 0) return false;
+  int next = -1;
+  for (int i = idx + 1; i < SETTINGS_TOGGLEABLE_COUNT; ++i) {
+    if (s_visual_order[i] != TOGGLE_RADAR) { next = i; break; }
+  }
+  if (next < 0) return false;
+  uint8_t tmp = s_visual_order[next];
+  s_visual_order[next] = s_visual_order[idx];
+  s_visual_order[idx] = tmp;
+  s_cursor = visible_pos + 1;
+  prv_persist_order();
+  return true;
+}
+#endif

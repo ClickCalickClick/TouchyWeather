@@ -71,7 +71,7 @@ void card_settings_draw(GContext *ctx, GRect bounds) {
         box_size, theme_secondary());
   }
 
-  for (int i = 0; i < SETTINGS_TOGGLEABLE_COUNT; ++i) {
+  for (int i = 0; i < SETTINGS_VIS_COUNT; ++i) {
     int y = top_y + (LOCKED_COUNT + i) * row_h;
     bool is_cursor = (i == cursor);
     GColor txt = is_cursor ? theme_accent_advice() : theme_fg();
@@ -94,7 +94,7 @@ void card_settings_draw(GContext *ctx, GRect bounds) {
     }
 
     graphics_context_set_text_color(ctx, txt);
-    ToggleId tid = settings_visual_id(i);
+    ToggleId tid = SETTINGS_VIS_ID(i);
     graphics_draw_text(ctx, settings_label(tid), row_font,
         GRect(row_x, y - 2, label_max_w, row_h + 2),
         GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);

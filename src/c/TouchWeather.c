@@ -189,7 +189,7 @@ static void prv_select_click(ClickRecognizerRef r, void *ctx) {
   }
   if (strcmp(nav_current_name(), "Settings") == 0) {
     int cur = settings_cursor();
-    ToggleId tid = settings_visual_id(cur);
+    ToggleId tid = SETTINGS_VIS_ID(cur);
     bool now = !settings_get_enabled(tid);
     settings_set_enabled(tid, now);
     nav_set_enabled(s_toggle_to_card_idx[tid], now);
