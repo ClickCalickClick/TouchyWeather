@@ -68,7 +68,7 @@ void card_main_draw(GContext *ctx, GRect bounds) {
     // Foreground color: black on the light theme, white on dark.
     graphics_context_set_text_color(ctx, theme_fg());
     graphics_draw_text(ctx, d->location_name,
-                       fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
+                       ui_font_label(),
                        GRect(loc_x, 2 + loc_shift, loc_w, 18),
                        GTextOverflowModeTrailingEllipsis,
                        GTextAlignmentCenter, NULL);
@@ -84,7 +84,7 @@ void card_main_draw(GContext *ctx, GRect bounds) {
   // width LECO_42 needs.
   char temp_buf[8];
   snprintf(temp_buf, sizeof(temp_buf), "%d°", d->temp);
-  GFont temp_font = fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS);
+  GFont temp_font = ui_font_number();
   int hilo_w = 52;
   GRect temp_r = GRect(bounds.origin.x + margin, temp_y,
                        W - 2 * margin - hilo_w, temp_h);
@@ -102,7 +102,7 @@ void card_main_draw(GContext *ctx, GRect bounds) {
                      theme_accent_orange());
   char hi_buf[8]; snprintf(hi_buf, sizeof(hi_buf), "%d°", d->high);
   graphics_context_set_text_color(ctx, theme_accent_orange());
-  graphics_draw_text(ctx, hi_buf, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+  graphics_draw_text(ctx, hi_buf, ui_font_header(),
                      GRect(hilo_x + 10, temp_y + 2, hilo_w - 10, 22),
                      GTextOverflowModeTrailingEllipsis,
                      GTextAlignmentRight, NULL);
@@ -111,7 +111,7 @@ void card_main_draw(GContext *ctx, GRect bounds) {
                        theme_accent_blue());
   char lo_buf[8]; snprintf(lo_buf, sizeof(lo_buf), "%d°", d->low);
   graphics_context_set_text_color(ctx, theme_accent_blue());
-  graphics_draw_text(ctx, lo_buf, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+  graphics_draw_text(ctx, lo_buf, ui_font_header(),
                      GRect(hilo_x + 10, temp_y + 24, hilo_w - 10, 22),
                      GTextOverflowModeTrailingEllipsis,
                      GTextAlignmentRight, NULL);
@@ -122,7 +122,7 @@ void card_main_draw(GContext *ctx, GRect bounds) {
   snprintf(feels_buf, sizeof(feels_buf), "FEELS %d°", d->feels_like);
   graphics_context_set_text_color(ctx, theme_fg());
   graphics_draw_text(ctx, feels_buf,
-                     fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+                     ui_font_body(),
                      GRect(ox, temp_y + temp_h - feels_lift, W, 30),
                      GTextOverflowModeTrailingEllipsis,
                      GTextAlignmentCenter, NULL);
@@ -142,7 +142,7 @@ void card_main_draw(GContext *ctx, GRect bounds) {
            d->wind_speed, wind_unit, d->wind_dir);
   graphics_context_set_text_color(ctx, theme_fg());
   graphics_draw_text(ctx, wind_buf,
-                     fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+                     ui_font_header(),
                      GRect(ox, row_y + 16, W/2, 22),
                      GTextOverflowModeTrailingEllipsis,
                      GTextAlignmentCenter, NULL);
@@ -157,7 +157,7 @@ void card_main_draw(GContext *ctx, GRect bounds) {
     snprintf(hum_buf, sizeof(hum_buf), "%d%%", d->humidity);
   }
   graphics_draw_text(ctx, hum_buf,
-                     fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+                     ui_font_header(),
                      GRect(ox + W/2, row_y + 16, W/2, 22),
                      GTextOverflowModeTrailingEllipsis,
                      GTextAlignmentCenter, NULL);
