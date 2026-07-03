@@ -23,8 +23,17 @@ void card_uv_draw(GContext *ctx, GRect bounds) {
                                 theme_fg(),
                                 header_y, 18, icon_draw_sun);
 
-  // Half-arc gauge (180° from -90 to +90).
+  // Half-arc gauge (180° from -90 to +90). Small classes (144x168 / 180x180)
+  // shrink the radius: the gabbro-260 radius (72) overflows the short screens
+  // and drove the value/label/PEAK under the bottom banner (Phase 5.2). Large
+  // classes keep verbatim values -> emery/gabbro byte-identical.
+#if defined(UI_SCREEN_SMALL_ROUND)
+  int radius = 42;
+#elif defined(UI_SCREEN_SMALL_RECT)
+  int radius = 44;
+#else
   int radius = PBL_IF_ROUND_ELSE(72, 64);
+#endif
   int thickness = 10;
   GPoint c = { ox + W/2, header_y + UI_HEADER_HEIGHT + 8 + radius };
   GRect arc_box = GRect(c.x - radius, c.y - radius, radius*2, radius*2);
@@ -40,18 +49,24 @@ void card_uv_draw(GContext *ctx, GRect bounds) {
                        DEG_TO_TRIGANGLE(-90),
                        DEG_TO_TRIGANGLE(-90 + sweep_deg));
 
-  // Big number inside.
+  // Big number inside. Small classes lift the number box and tighten the
+  // label/PEAK offsets so all three clear the shrunken gauge and the banner.
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  int num_top = c.y - 38, num_h = 44, label_dy = 6, peak_dy = 24;
+#else
+  int num_top = c.y - 32, num_h = 50, label_dy = 18, peak_dy = 38;
+#endif
   char buf[8]; snprintf(buf, sizeof(buf), "%d", d->uv);
   graphics_context_set_text_color(ctx, theme_fg());
   graphics_draw_text(ctx, buf,
       ui_font_number(),
-      GRect(c.x - radius, c.y - 32, radius*2, 50),
+      GRect(c.x - radius, num_top, radius*2, num_h),
       GTextOverflowModeFill, GTextAlignmentCenter, NULL);
 
   // Label below.
   graphics_draw_text(ctx, uv_label(d->uv),
       ui_font_header(),
-      GRect(ox, c.y + 18, W, 24),
+      GRect(ox, c.y + label_dy, W, 24),
       GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
 
   // "PEAK n" subtitle in the secondary color, just below the qualitative
@@ -63,7 +78,7 @@ void card_uv_draw(GContext *ctx, GRect bounds) {
     graphics_context_set_text_color(ctx, theme_secondary());
     graphics_draw_text(ctx, peak_buf,
         ui_font_caption(),
-        GRect(ox, c.y + 38, W, 18),
+        GRect(ox, c.y + peak_dy, W, 18),
         GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
   }
 
