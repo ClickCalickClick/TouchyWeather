@@ -918,4 +918,86 @@ hoisted variable.
   axis** inside the same accessor bodies that now carry the screen-class axis.
 - The three small deferred fixes above (UV tofu clamp, chalk update_notes clip,
   Settings RADAR row) are each a tidy standalone commit if a finishing pass is
-  wanted first.
+  wanted first. **→ Done in the Phase 5 finishing pass below.**
+
+## Phase 5 finishing pass — the three deferred fixes (2026-07-03, later still)
+
+Resumed on `feature/roadmap-phases`; Jared picked the **3 small deferred fixes**
+over jumping straight to Big Mode, to make Phase 5 spotless first. **3 commits**,
+one per fix, tree clean, `pebble build` green for all 6, **nothing pushed**. The
+two layout-only fixes kept **emery + gabbro byte-identical** (verified with
+`cmp -l ref-<p>.bin build/<p>/pebble-app.bin | awk '$1>168'` == 0 on both, refs
+snapshotted from the pre-pass HEAD). The UV clamp is a genuine cross-platform
+data guard, so it intentionally changes emery/gabbro **in the bad-data case only**.
+
+### F1. UV clamp — `cards/uv.c` (NOT byte-identical, by design)
+- **What:** The UV hero draws through the LECO numerals font, which has no minus
+  glyph, so a negative/unknown live UV rendered "-1" with a tofu box, and the
+  half-arc gauge swept backwards. UV index is physically 0+, so clamp the drawn
+  value to `>=0` up front and feed the clamp to the gauge sweep, the hero
+  numeral, and the qualitative label. Bad data now reads **"0 / LOW"** with an
+  empty gauge.
+- **Why not "—":** an em-dash is also tofu in a numbers-only font; 0 is the
+  honest floor and matches the empty gauge. The detail-modal UV summary uses a
+  Gothic font (has a minus), so it never had the tofu — scope was just the card.
+- **Verification (emery):** forced `uv=-1` → renders "0 / LOW" (LECO's chunky
+  zero, which reads as a block at emulator scale but is the real 0 glyph — I
+  disambiguated by forcing `uv=6`, which rendered a clean "6 / HIGH" with the
+  orange sweep, proving the render path and that the "-1" block was the clamped
+  zero, not tofu). This fix touches all platforms' code intentionally.
+
+### F2. update_notes fits on chalk — `update_notes.c` (emery/gabbro byte-identical)
+- **What:** The splash's sun + headline + version-divider header was tuned for
+  the tall large screens; on the short small classes it ate most of the height,
+  so the note wrapped under the fold and — worst on **chalk (180 round)**, where
+  the bottom curve also clips the body's left edge — the last visible line
+  rendered half-cut mid-word ("…eps working").
+- **Fix (small classes only):** shrink the sun (32→24), tighten the header's
+  vertical rhythm, and reclaim right-side body width so the note wraps to fewer
+  lines. On **small-round additionally** hold the scroll viewport 16px above the
+  bottom so no line lands in the round clip band.
+- **Byte-identical discipline (a re-learned lesson):** my first attempt hoisted
+  the header offsets into shared `int` locals that the *large* path also used
+  (`head_top = UI_HEADER_Y`, etc.) — storing the `ui_header_y()` result in a
+  local shifted codegen and cascaded to **13k differing bytes** on both emery and
+  gabbro. Fix: split with `#if` and keep the large branch the **verbatim inline
+  expressions** (same rule as the 5.2 GFont gotcha — don't hoist a value the
+  verbatim path uses). The round scroll inset is gated to `UI_SCREEN_SMALL_ROUND`
+  (chalk), NOT `PBL_IF_ROUND_ELSE`, so gabbro (large-round) stays untouched.
+  Re-verified 0/0.
+- **Verification:** chalk shows 4 full clean lines with the rest scrolling in to
+  "the app."; basalt (small-rect, also on the changed path) renders cleanly.
+
+### F3. Hide the inert RADAR row in Settings — `settings.*` + card + TouchWeather.c (emery/gabbro byte-identical)
+- **What:** On carved-out platforms radar is force-off but the Settings card
+  still drew an inert RADAR checkbox. The 5.2-flagged risk was that radar is not
+  last in the visual order, so a count reduction drops the wrong row.
+- **Fix:** a radar-free **"visible" view** over the toggleable rows, used by the
+  card draw, the SELECT-toggle handler, the cursor wrap, and the reorder — on
+  carved-out platforms only. `settings_visible_count/id()` filter radar wherever
+  it sits; `move_up/down` swap the moved visible card with its nearest *visible*
+  neighbor in `s_visual_order`, stepping over the hidden radar slot so radar
+  keeps its place. Underlying size-10 arrays, persist keys (`KEY_TOGGLE_BASE+8`),
+  and the nav traversal (radar stays in the order, disabled) are unchanged, so
+  settings still survive roaming.
+- **Byte-identical mechanic:** the `SETTINGS_VIS_COUNT` / `SETTINGS_VIS_ID(i)`
+  macros expand to the **exact original tokens** (`SETTINGS_TOGGLEABLE_COUNT` /
+  `settings_visual_id(i)`) when `TW_RADAR_SUPPORTED`, and `cursor_advance` /
+  `move_up` / `move_down` keep verbatim bodies under `#if` — so emery + gabbro
+  are 0/0.
+- **Verification:** basalt + chalk Settings now end at GOLDEN HR with no RADAR
+  row or checkbox; emery/gabbro unmoved.
+
+### Still open after this pass
+- The rotating footer hint on the Settings card **overlaps the lower rows on the
+  small screens** (basalt 144, chalk 180) — a pre-existing density issue,
+  slightly *relieved* by dropping the radar row (10 rows → 9 toggle rows), not
+  introduced here. Not fixed (out of scope for the radar removal); a small-class
+  footer-position tune is a clean separate task if wanted.
+- basalt Week precip `%` tight on the right edge (unchanged, legible).
+
+### Next
+- **Big Mode (Stage B)** is now the only big roadmap item left — Phase 5 is
+  spotless. Add the Normal/Big **scale axis** inside the same accessor bodies
+  that carry the screen-class axis; prove on one or two spots (emery/gabbro
+  byte-identical with Big off, one small platform renders Big right) then spread.
