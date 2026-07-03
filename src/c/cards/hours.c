@@ -60,13 +60,32 @@ void card_hours_draw(GContext *ctx, GRect bounds) {
                                 UI_HEADER_Y, 18, icon_draw_clock);
 
   // Tighter row font so 6 rows fit without crowding the page indicator.
+  // Small classes (144x168 / 180x180): the 18px row font + header offset that
+  // fit emery/gabbro push the 5th/6th row under the bottom banner on the
+  // shorter screens. Drop the rows to the 14px bold label font and tighten row
+  // height + top offset so all 6 hours clear the banner (Phase 5.2). Each
+  // variable branches individually (order preserved) so the large classes keep
+  // verbatim values and emery/gabbro stay byte-identical.
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  GFont row_font = ui_font_label();
+#else
   GFont row_font = ui_font_header();
+#endif
   GFont pop_font = ui_font_label();
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  int icon_size = 14;
+#else
   int icon_size = 16;
+#endif
   // Gaps are tighter on rect so wind + precip both fit in 176px usable.
   int gap = PBL_IF_ROUND_ELSE(5, 4);
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  int row_h = 15;
+  int top_y = UI_HEADER_Y + UI_HEADER_HEIGHT + PBL_IF_ROUND_ELSE(0, 2);
+#else
   int row_h = PBL_IF_ROUND_ELSE(20, 19);
   int top_y = UI_HEADER_Y + UI_HEADER_HEIGHT + PBL_IF_ROUND_ELSE(10, 6);
+#endif
 
   // Context column glyph widths.
   int drop_icon  = 10;
@@ -123,7 +142,11 @@ void card_hours_draw(GContext *ctx, GRect bounds) {
   for (int i = 0; i < 6; ++i) {
     int row_y = top_y + i * row_h;
     int icon_cx = cluster_x + time_max.w + gap + icon_size / 2;
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+    int icon_cy = row_y + 8;   // center on the shorter 14px small-class row
+#else
     int icon_cy = row_y + 10;
+#endif
 
     graphics_context_set_text_color(ctx, theme_fg());
     graphics_draw_text(ctx, d->hours_label[i], row_font,
