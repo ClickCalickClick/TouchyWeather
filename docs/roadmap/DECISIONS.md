@@ -1201,3 +1201,25 @@ set (now the durable rules):
 - **Big Mode is now feature-complete across all 12 cards** (Settings intentionally
   exempt). Remaining before merge: the visual pass above, plus the standing Phase 4
   + Phase 5 hardware sign-off and a real low-vision legibility/contrast pass.
+
+### ✅ Verification COMPLETED (2026-07-04, after Jared rebooted the machine)
+The emulator's app-launch failure above was environmental — a machine reboot
+cleared it. Big-ON was then screenshot-verified:
+- **basalt (small-rect 144×168 — the tightest class): ALL 9 spread cards render
+  correctly** — Advice (badge dropped, big 1-line headline, quip wraps, banner),
+  Week (3 days `↑hi ↓lo`), Precipitation (3-bar frame + banner), UV ("4 / MODERATE",
+  no gauge), Air Quality ("29 / GOOD" in **green** — category colour kept), Sun
+  Cycle (big times + both rows), Night Sky (bigger moon + name, **banner present**),
+  and **Golden Hour** — the novel 2×2 grid — with all four milestones visible
+  (filled■ blue / outline□ gold × AM/PM), correct chronology, fits 144px.
+- **gabbro (large-round): Main, Radar, Golden Hour** confirmed — Radar shows the
+  **added banner** + bigger FETCHING text (the live bitmap/crosshair needs a phone
+  feed, unavailable in-emulator), and Golden Hour shows the large-class BLUE/GOLD
+  word labels beside the shapes.
+- No layout defects found; none of the flagged risks materialised (Golden Hour
+  fits 144px, the Advice quip reads fine). The one residual is the documented
+  Advice small-rect quip length limit (long phrases can still clip — headline +
+  banner always show); a short-phrase small-class pool remains the clean follow-up.
+- Still pending (unchanged): the standing Phase 4 + Phase 5 hardware sign-off, a
+  real low-vision legibility/contrast pass, and Radar's live bitmap+crosshair on a
+  phone-connected build.
