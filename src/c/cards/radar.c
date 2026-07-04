@@ -3,6 +3,9 @@
 #include "../icons.h"
 #include "../ui.h"
 #include "../comm.h"
+#include "../settings.h"
+#include "../weather_data.h"
+#include "../anim.h"
 #include <pebble.h>
 #include <string.h>
 #include <stdlib.h>
@@ -177,7 +180,13 @@ void card_radar_draw(GContext *ctx, GRect bounds) {
     prv_request_if_needed();
   }
 
-  GFont body = ui_font_header();
+  // --- Big Mode (Stage B): bigger state text + crosshair, and ADD the
+  // mandatory status banner (this is the one card that never drew it). Gated on
+  // Big Mode so the Normal radar look is unchanged (Big-OFF pixel-identical).
+  // Radar only navigates on emery/gabbro (large classes), so no small-class
+  // tuning is needed. ---
+  bool big = settings_get_big_mode();
+  GFont body = big ? ui_font_body() : ui_font_header();
   GFont small = ui_font_label();
 
   if (s_state == RADAR_READY && s_bitmap) {
@@ -190,19 +199,23 @@ void card_radar_draw(GContext *ctx, GRect bounds) {
     graphics_draw_bitmap_in_rect(ctx, s_bitmap,
                                  GRect(img_x, img_y, img_w, img_h));
 
-    // Crosshair on user location (image center).
+    // Crosshair on user location (image center). Bigger + thicker in Big Mode
+    // so "you are here" is findable.
     int cx = img_x + img_w / 2;
     int cy = img_y + img_h / 2;
+    int arm = big ? 8 : 4;
     graphics_context_set_stroke_color(ctx, theme_accent_orange());
-    graphics_context_set_stroke_width(ctx, 2);
-    graphics_draw_line(ctx, GPoint(cx - 4, cy), GPoint(cx + 4, cy));
-    graphics_draw_line(ctx, GPoint(cx, cy - 4), GPoint(cx, cy + 4));
+    graphics_context_set_stroke_width(ctx, big ? 3 : 2);
+    graphics_draw_line(ctx, GPoint(cx - arm, cy), GPoint(cx + arm, cy));
+    graphics_draw_line(ctx, GPoint(cx, cy - arm), GPoint(cx, cy + arm));
 
     // Footer attribution required by RainViewer TOS. Anchored relative to
     // card bottom so it clears the card indicator on both rect and round.
-    // Round needs more clearance due to the larger bottom bezel.
+    // Round needs more clearance due to the larger bottom bezel. In Big Mode
+    // it lifts further to sit just above the added status banner.
     GFont tiny = ui_font_caption();
-    int foot_y = H - PBL_IF_ROUND_ELSE(51, 35);
+    int foot_y = big ? (H - PBL_IF_ROUND_ELSE(81, 66))
+                     : (H - PBL_IF_ROUND_ELSE(51, 35));
     prv_draw_centered_text(ctx, bounds, "RAINVIEWER",
                            tiny, theme_secondary(), foot_y);
   } else if (s_state == RADAR_LOADING) {
@@ -231,5 +244,15 @@ void card_radar_draw(GContext *ctx, GRect bounds) {
     int center_y = UI_HEADER_Y + UI_HEADER_HEIGHT + (H - UI_HEADER_HEIGHT) / 2 - 12;
     prv_draw_centered_text(ctx, bounds, "Loading\u2026",
                            body, theme_secondary(), center_y);
+  }
+
+  // Mandatory status banner in Big Mode \u2014 radar is the only card that never
+  // drew one, so add it here (in every radar state) so the last-updated / rain
+  // alert is always visible. Normal mode is unchanged (no banner) so the current
+  // radar look is preserved.
+  if (big) {
+    WeatherData *d = weather_data_get();
+    ui_draw_auto_banner(ctx, bounds, d->rain_alert_min, d->last_updated,
+                        anim_get_frame());
   }
 }
