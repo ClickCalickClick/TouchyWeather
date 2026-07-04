@@ -217,7 +217,16 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
   }
   // Re-apply the (now-updated) enable flags, visual order and Settings-card
   // visibility to nav so the rotation and page dots reflect Clay immediately.
-  if (cards_changed && s_visibility_cb) s_visibility_cb();
+  if (cards_changed) {
+    if (s_visibility_cb) s_visibility_cb();
+    // Converge the phone's seed cache to the just-applied state. Without this
+    // a Clay save left the cache holding PRE-save state, and reopening the
+    // config page injected it over the saved values (visually reverting them;
+    // a second save then really reverted them on the watch too). Debounced;
+    // no echo loop — seeds go watch→phone and are only cached there, never
+    // sent back to the watch.
+    comm_send_card_state();
+  }
   if ((t = dict_find(iter, MESSAGE_KEY_AutoHidePrecip))) {
     bool on = (t->type == TUPLE_CSTRING) ? (atoi(t->value->cstring) != 0)
                                          : (t->value->int32 != 0);

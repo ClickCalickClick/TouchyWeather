@@ -5,21 +5,35 @@ var Clay = require('@rebble/clay');
 var clayConfig = require('./config');
 
 // Runs inside the Clay config page (serialized with toSource — must be
-// closure-free, ES5). Gates the HideSettingsCard toggle on PhoneManagesCards:
-// hiding the watch's Settings card is only offered while the phone manages
-// cards, mirroring the on-watch fail-safe AND in settings.c.
+// closure-free, ES5). Greys out everything that only applies while
+// PhoneManagesCards is on: the per-card toggles, the drag-order list and
+// HideSettingsCard. This mirrors comm.c's gate — without the grey-out, gated
+// values a user changed while the gate was off would silently snap back to
+// watch truth on the next open (the seed injection), which reads as a bug.
+// HideSettingsCard is additionally forced OFF while ungated (the on-watch
+// fail-safe AND makes it ineffective anyway; showing it checked would lie).
 var clayCustomFn = function(minified) {
   var page = this;
   page.on(page.EVENTS.AFTER_BUILD, function() {
     var gate = page.getItemByMessageKey('PhoneManagesCards');
-    var hide = page.getItemByMessageKey('HideSettingsCard');
-    if (!gate || !hide) return;
+    if (!gate) return;
+    var gated = [
+      'HideSettingsCard', 'CardOrder',
+      'CardEnabledHours', 'CardEnabledWeek', 'CardEnabledPrecip',
+      'CardEnabledUV', 'CardEnabledAQ', 'CardEnabledSun', 'CardEnabledNight',
+      'CardEnabledGolden', 'CardEnabledRadar', 'CardEnabledAdvice'
+    ];
     function sync() {
-      if (gate.get()) {
-        hide.enable();
-      } else {
-        hide.set(false);
-        hide.disable();
+      var on = gate.get();
+      for (var i = 0; i < gated.length; i++) {
+        var item = page.getItemByMessageKey(gated[i]);
+        if (!item || !item.enable || !item.disable) continue;
+        if (on) {
+          item.enable();
+        } else {
+          if (gated[i] === 'HideSettingsCard') item.set(false);
+          item.disable();
+        }
       }
     }
     gate.on('change', sync);
@@ -950,6 +964,35 @@ Pebble.addEventListener('webviewclosed', function(e) {
     localStorage.setItem('locationOverride', dict.LocationOverride.value);
   } else {
     localStorage.removeItem('locationOverride');
+  }
+  // Optimistically update the watch-state seed cache with what this save will
+  // make the watch's card state, mirroring comm.c's gate logic exactly:
+  // PhoneManagesCards + HideSettingsCard are stored on the watch
+  // unconditionally; CardEnabled*/CardOrder apply only while the gate is ON.
+  // Without this, reopening Clay before the watch pushes a fresh seed would
+  // inject pre-save (stale) values over the settings just saved. The watch's
+  // own re-push after applying (comm.c) remains the authoritative corrector.
+  try {
+    var wcs = JSON.parse(localStorage.getItem('watchCardState') || '{}');
+    if (dict.PhoneManagesCards !== undefined) {
+      wcs.PhoneManagesCards = !!dict.PhoneManagesCards.value;
+    }
+    if (dict.HideSettingsCard !== undefined) {
+      wcs.HideSettingsCard = !!dict.HideSettingsCard.value;
+    }
+    if (wcs.PhoneManagesCards) {
+      for (var wi = 0; wi < WATCH_CARD_STATE_KEYS.length; wi++) {
+        var wk = WATCH_CARD_STATE_KEYS[wi];
+        if (wk === 'PhoneManagesCards' || wk === 'HideSettingsCard') continue;
+        if (dict[wk] === undefined) continue;
+        wcs[wk] = (wk === 'CardOrder') ? String(dict[wk].value)
+                                       : !!dict[wk].value;
+      }
+    }
+    localStorage.setItem('watchCardState', JSON.stringify(wcs));
+    console.log('watch card state cache updated from Clay save');
+  } catch (err) {
+    console.log('watch card state cache update skipped: ' + err.message);
   }
   var msg = clay.getSettings(e.response);
   Pebble.sendAppMessage(msg, function() {

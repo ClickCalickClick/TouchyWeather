@@ -44,6 +44,10 @@ module.exports = {
     '  touch-action: none;',
     '  -webkit-user-select: none;',
     '  user-select: none;',
+    '}',
+    '.component-cardorder.disabled {',
+    '  opacity: 0.4;',
+    '  pointer-events: none;',
     '}'
   ].join('\n'),
   defaults: {
@@ -97,6 +101,24 @@ module.exports = {
         list.appendChild(row);
       }
       return this.trigger('change');
+    },
+    // Gate grey-out support (customFn disables the list while
+    // PhoneManagesCards is off). pointer-events:none does the visual/most
+    // browsers; the data-disabled attribute is the belt-and-suspenders the
+    // drag handlers check on old webviews that ignore pointer-events.
+    disable: function() {
+      this.$manipulatorTarget[0].setAttribute('data-disabled', '1');
+      var root = this.$element[0];
+      if (String(root.className).indexOf('disabled') < 0) {
+        root.className += ' disabled';
+      }
+      return this.trigger('disabled');
+    },
+    enable: function() {
+      this.$manipulatorTarget[0].removeAttribute('data-disabled');
+      var root = this.$element[0];
+      root.className = String(root.className).replace(/ *\bdisabled\b/g, '');
+      return this.trigger('enabled');
     }
   },
   initialize: function(minified, clayConfig) {
@@ -125,6 +147,7 @@ module.exports = {
     }
     function start(e) {
       if (drag) return;
+      if (list.getAttribute('data-disabled')) return;
       if (!inClass(e.target, 'cardorder-grip')) return;
       var row = inClass(e.target, 'cardorder-row');
       if (!row) return;

@@ -1399,3 +1399,45 @@ save, un-gate → Settings returns. A standalone mouse-drag harness embedding
 the shipped cardorder.js was generated for a desktop pre-check
 (cardorder-harness.html, sent in-session; regenerate via the embedded
 generator noted there or just test via emu-app-config post-reboot).
+
+### SC.4. BUGFIX — Clay card settings reverted on config reopen (stale seed cache)
+- **Symptom (Jared, real-phone test):** save Clay → settings reach the watch →
+  reopen Clay → the card-related settings show pre-save values; saving again
+  (without redoing them) then really reverts them on the watch.
+- **Root cause:** SC.1's `showConfiguration` injection overwrites Clay's
+  persisted settings from the `watchCardState` cache on EVERY open, but that
+  cache was only written on watch seed pushes (launch + on-watch changes) —
+  never after a Clay save. So the cache held pre-save state until the next
+  watchapp launch; reopening sooner injected stale values, and a follow-up
+  save sent them back to the watch. Only the 13 injected card-state keys were
+  affected — all other settings persist via clay-settings normally, hence
+  "some but not all revert".
+- **Fix (three parts):**
+  - **A (watch, authoritative):** comm.c's `cards_changed` branch now also
+    calls `comm_send_card_state()`, so applying a Clay change immediately
+    re-pushes the watch's true state to the phone cache. No echo loop: seeds
+    go watch→phone and are only cached there.
+  - **B (PKJS, closes the ~1s race):** `webviewclosed` optimistically updates
+    `watchCardState` with the saved values, mirroring comm.c's gate exactly
+    (PhoneManagesCards/HideSettingsCard unconditionally; CardEnabled*/CardOrder
+    only when the gate is ON). A's push remains the corrector if the watch
+    rejects anything or never received the save.
+  - **C (UX):** the customFn grey-out now covers ALL gated items (10 card
+    toggles + the drag-order list + HideSettingsCard) while PhoneManagesCards
+    is off — the cardorder manipulator gained disable/enable (data-disabled
+    attr checked by the drag handlers + `.disabled` opacity/pointer-events
+    CSS). Ungated edits to card items are thereby impossible, so the designed
+    snap-back-to-watch-truth can no longer masquerade as this bug. Values are
+    NOT reset on disable (except HideSettingsCard → false, as before); the
+    seed injection restores watch truth on next open.
+- **Verification:** build green (6 platforms). **A end-to-end in the emulator
+  (chalk):** injected Clay-style change `{PhoneManagesCards:1,CardEnabledUV:0}`
+  → a fresh seed push arrived ~1s later WITHOUT a relaunch, echoing
+  `PhoneManagesCards:true, CardEnabledUV:false`. **B via node against the
+  SHIPPED snippet** (extracted verbatim from index.js): gated save updates
+  order+enable in the cache; ungated save leaves card values at watch truth
+  while updating the two gate toggles; corrupt cache tolerated. **C** is
+  page-side: parse-checked + manipulator shape-checked; eyeball on the next
+  real-phone pass (toggles/list grey out when the gate is toggled off, live).
+  Emulator persist wiped after the test. Jared's repro flow (save → reopen →
+  values stick; save-again no longer reverts) should now pass on the phone.
