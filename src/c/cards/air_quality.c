@@ -2,6 +2,7 @@
 #include "../theme.h"
 #include "../icons.h"
 #include "../ui.h"
+#include "../settings.h"
 #include "../weather_data.h"
 #include "../anim.h"
 #include <stdio.h>
@@ -52,6 +53,55 @@ void card_air_quality_draw(GContext *ctx, GRect bounds) {
   // Slide-transition origin offset (Phase 10F): translate every X coord
   // so the gauge moves with the card during the 200ms push.
   int ox = bounds.origin.x;
+
+  // --- Big Mode (Stage B): drop the arc gauge; giant number + big label. ---
+  // Twin of the Big UV layout. AQI keeps its EPA category COLOR on the number
+  // and label (the one hue that IS the data) — it opts back out of the Big-Mode
+  // contrast collapse, since severity-by-color is the point. Pollen shows on the
+  // large classes only. Mandatory banner kept. Returns early -> Normal gauge
+  // layout below untouched, Big-OFF pixel-identical.
+  if (settings_get_big_mode()) {
+    ui_draw_card_header_with_icon(ctx, bounds, "AIR QUALITY", theme_fg(),
+                                  UI_HEADER_Y, 18, icon_draw_pulse);
+    GColor cat = aqi_category_color(d->aqi);
+    int num_y, label_y;
+#if defined(UI_SCREEN_SMALL_RECT)
+    num_y = 42; label_y = 92;
+#elif defined(UI_SCREEN_SMALL_ROUND)
+    num_y = 56; label_y = 106;
+#elif defined(UI_SCREEN_LARGE_RECT)
+    num_y = 54; label_y = 112;
+#else  // UI_SCREEN_LARGE_ROUND
+    num_y = 74; label_y = 132;
+#endif
+    char nb[8]; snprintf(nb, sizeof(nb), "%d", d->aqi);
+    graphics_context_set_text_color(ctx, cat);
+    graphics_draw_text(ctx, nb, ui_font_number(),
+        GRect(ox, num_y, W, 50), GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+    graphics_context_set_text_color(ctx, cat);
+    graphics_draw_text(ctx, aqi_label(d->aqi), ui_font_body(),
+        GRect(ox, label_y, W, 32), GTextOverflowModeTrailingEllipsis,
+        GTextAlignmentCenter, NULL);
+#if !defined(UI_SCREEN_SMALL_RECT) && !defined(UI_SCREEN_SMALL_ROUND)
+    if (d->pollen_level >= 0) {
+      const char *plabel;
+      int lvl = d->pollen_level;
+      if (lvl == 0)      plabel = "POLLEN: NONE";
+      else if (lvl == 1) plabel = "POLLEN: VERY LOW";
+      else if (lvl == 2) plabel = "POLLEN: LOW";
+      else if (lvl == 3) plabel = "POLLEN: MODERATE";
+      else if (lvl == 4) plabel = "POLLEN: HIGH";
+      else               plabel = "POLLEN: VERY HIGH";
+      graphics_context_set_text_color(ctx, theme_fg());
+      graphics_draw_text(ctx, plabel, ui_font_header(),
+          GRect(ox, label_y + 34, W, 24), GTextOverflowModeTrailingEllipsis,
+          GTextAlignmentCenter, NULL);
+    }
+#endif
+    ui_draw_auto_banner(ctx, bounds, d->rain_alert_min, d->last_updated,
+                        anim_get_frame());
+    return;
+  }
 
   // Header in fg for legibility; the category color carries the signal.
   int header_y = UI_HEADER_Y;
