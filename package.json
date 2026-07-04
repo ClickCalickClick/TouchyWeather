@@ -172,7 +172,8 @@
       "CardEnabledRadar",
       "CardEnabledAdvice",
       "AutoHidePrecip",
-      "CardOrder"
+      "CardOrder",
+      "HideSettingsCard"
     ],
     "resources": {
     "media": [

@@ -162,13 +162,27 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
     settings_set_big_mode(on);
     if (s_update_cb) s_update_cb();
   }
-  // Phase 2.2: per-card visibility from Clay. Only applied when the user has
-  // opted into phone control (PhoneManagesCards); otherwise on-watch card
-  // management is left untouched. Card ORDER always stays on-watch.
+  // Phase 2.2 + Settings-in-Clay: per-card visibility, card order and the
+  // hide-Settings-card opt-in from Clay. Visibility/order only apply when the
+  // user has opted into phone control (PhoneManagesCards); otherwise on-watch
+  // card management is left untouched.
+  bool cards_changed = false;
   if ((t = dict_find(iter, MESSAGE_KEY_PhoneManagesCards))) {
     bool on = (t->type == TUPLE_CSTRING) ? (atoi(t->value->cstring) != 0)
                                          : (t->value->int32 != 0);
+    // A gate flip changes the EFFECTIVE hide-Settings state (it's an AND of
+    // the two toggles), so nav must re-apply — e.g. turning phone management
+    // off must immediately bring the Settings card back.
+    if (on != settings_get_phone_manages_cards()) cards_changed = true;
     settings_set_phone_manages_cards(on);
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_HideSettingsCard))) {
+    bool on = (t->type == TUPLE_CSTRING) ? (atoi(t->value->cstring) != 0)
+                                         : (t->value->int32 != 0);
+    // Stored unconditionally; only effective while PhoneManagesCards is on
+    // (settings_get_settings_card_hidden ANDs the two — the fail-safe).
+    if (on != settings_get_hide_settings_card()) cards_changed = true;
+    settings_set_hide_settings_card(on);
   }
   if (settings_get_phone_manages_cards()) {
     // Message key → ToggleId. Keys carry 1 = show, 0 = hide per card.
@@ -185,26 +199,25 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
       { MESSAGE_KEY_CardEnabledRadar,  TOGGLE_RADAR  },
       { MESSAGE_KEY_CardEnabledAdvice, TOGGLE_ADVICE },
     };
-    bool vis_changed = false;
     for (unsigned i = 0; i < sizeof(vis_map) / sizeof(vis_map[0]); ++i) {
       Tuple *vt = dict_find(iter, vis_map[i].key);
       if (!vt) continue;
       bool en = (vt->type == TUPLE_CSTRING) ? (atoi(vt->value->cstring) != 0)
                                             : (vt->value->int32 != 0);
       settings_set_enabled(vis_map[i].tid, en);
-      vis_changed = true;
+      cards_changed = true;
     }
     // Card ORDER from Clay (the drag-reorder control) — a CSV of ToggleIds.
     // Strictly validated in settings_apply_order_csv; a bad string is ignored.
     Tuple *ot = dict_find(iter, MESSAGE_KEY_CardOrder);
     if (ot && ot->type == TUPLE_CSTRING &&
         settings_apply_order_csv(ot->value->cstring)) {
-      vis_changed = true;
+      cards_changed = true;
     }
-    // Re-apply the (now-updated) enable flags + visual order to nav so the
-    // rotation and page dots reflect Clay immediately.
-    if (vis_changed && s_visibility_cb) s_visibility_cb();
   }
+  // Re-apply the (now-updated) enable flags, visual order and Settings-card
+  // visibility to nav so the rotation and page dots reflect Clay immediately.
+  if (cards_changed && s_visibility_cb) s_visibility_cb();
   if ((t = dict_find(iter, MESSAGE_KEY_AutoHidePrecip))) {
     bool on = (t->type == TUPLE_CSTRING) ? (atoi(t->value->cstring) != 0)
                                          : (t->value->int32 != 0);
@@ -544,6 +557,9 @@ static void prv_send_card_state_now(void *ctx) {
   }
   dict_write_uint8(iter, MESSAGE_KEY_PhoneManagesCards,
                    settings_get_phone_manages_cards() ? 1 : 0);
+  // Raw toggle value (not the gated AND) so Clay shows what the user chose.
+  dict_write_uint8(iter, MESSAGE_KEY_HideSettingsCard,
+                   settings_get_hide_settings_card() ? 1 : 0);
   dict_write_end(iter);
   app_message_outbox_send();
 }

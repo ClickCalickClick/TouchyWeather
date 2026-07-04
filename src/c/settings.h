@@ -7,9 +7,10 @@
 // The first card (index 0 = Main) is PERMANENT. It is not represented
 // in this module; callers should always treat it as enabled.
 //
-// The Settings card itself (last in the carousel) is also always
-// enabled — there'd be no escape hatch otherwise. It is NOT in the
-// toggleable list.
+// The Settings card itself (last in the carousel) is NOT in the
+// toggleable list. It is always shown UNLESS the user opts into hiding
+// it (HideSettingsCard), which is only effective while PhoneManagesCards
+// is on — so there is always an escape hatch (watch card or Clay).
 
 // Number of cards that can be toggled on the Settings screen.
 #define SETTINGS_TOGGLEABLE_COUNT 10
@@ -96,6 +97,16 @@ void settings_set_big_mode(bool enabled);
 // Card REORDER always stays on-watch regardless. Persisted.
 bool settings_get_phone_manages_cards(void);
 void settings_set_phone_manages_cards(bool enabled);
+
+// Opt-in (persist 208): remove the Settings card from the carousel, so
+// button-only watches scroll purely weather cards and manage everything from
+// Clay. Raw toggle value; the EFFECTIVE state is
+// settings_get_settings_card_hidden() = HideSettingsCard AND
+// PhoneManagesCards — the on-watch fail-safe that guarantees card management
+// is always reachable somewhere. Default off. Persisted.
+bool settings_get_hide_settings_card(void);
+void settings_set_hide_settings_card(bool hidden);
+bool settings_get_settings_card_hidden(void);
 
 // Opt-in (Phase 3.2): auto-hide the Precipitation + Radar cards when no rain is
 // expected soon, reclaiming carousel space when it's dry. Default off. Persisted.

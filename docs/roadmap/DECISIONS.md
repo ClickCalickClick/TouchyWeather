@@ -1312,3 +1312,54 @@ cache bump (still 108).
   is an interactive browser). A standalone browser harness is provided for a
   mouse test (see session summary), and the REAL-PHONE Clay save test remains
   REQUIRED before ship (added to the hardware sign-off list).
+
+### SC.3. HideSettingsCard — opt-in, gated on PhoneManagesCards, with fail-safe
+- **What:** New toggle `HideSettingsCard` (persist **208**, message key
+  `HideSettingsCard`, default off) removes the Settings card from the carousel
+  so button scrolling is purely weather cards; all card management then lives
+  in Clay. Per the baked decision, `PhoneManagesCards` is NOT retired — it is
+  the REQUIRED GATE (now load-bearing).
+- **Fail-safe (two layers):**
+  1. **On-watch:** the effective state is
+     `settings_get_settings_card_hidden() = HideSettingsCard AND
+     PhoneManagesCards`. comm.c fires the cards-changed callback whenever
+     either toggle FLIPS, so turning phone management off instantly restores
+     the Settings card — even with HideSettingsCard still persisted on. The
+     user can never strand themselves without card control.
+  2. **In Clay:** a `customFn` (index.js `clayCustomFn`, serialized into the
+     page — closure-free) greys out HideSettingsCard and forces it to false
+     while PhoneManagesCards is off.
+- **Mechanism:** `nav_set_enabled(IDX_SETTINGS, !hidden)` inside
+  prv_apply_card_visibility — the radar-carve-out pattern. Omitting slot 11
+  from the traversal would NOT work: nav_set_traversal back-fills omitted
+  indices to keep the traversal a complete permutation. Page dots follow
+  automatically (indicator counts enabled cards only). If the user is ON the
+  Settings card when a Clay save hides it, the card stays visible until they
+  navigate away (same existing behavior as any card disabled under you).
+- **Settings-card parity audit (pre-hide requirement):** the card's only
+  functions are per-card enable (SELECT), reorder (UP/DOWN-long) and cursor
+  (tap) — enable has had Clay parity since 2.2, reorder gained it in SC.2,
+  the cursor is meaningless without the card. Nothing else is lost. All three
+  modes preserved: watch-only (gate off) · both (on + shown) · phone-only
+  (on + hidden). Residual (accepted, inherent to opting in): with phone
+  management on + Settings hidden, a user who loses the phone keeps their
+  current card set but can't change it until Clay is reachable again.
+- **comm.c restructure:** the visibility block now accumulates one
+  `cards_changed` flag across PhoneManagesCards/HideSettingsCard flips and the
+  gated enable/order decodes, firing the combined callback once at the end.
+  The seed (SC.1) pushes the RAW HideSettingsCard value so Clay shows the
+  user's actual choice, not the gated AND.
+- **Verification (log-based; the emulator remained in its fully-wedged
+  instant-exit state — nav-skip screenshots go on the post-reboot checklist):**
+  injected `{PhoneManagesCards:1, HideSettingsCard:1}` → relaunch seed echoed
+  both true (decode + persist proven); injected `{PhoneManagesCards:0}` →
+  relaunch seed echoed `PhoneManagesCards:false, HideSettingsCard:true` — the
+  exact fail-safe state where the AND yields "shown". The AND itself +
+  nav_set_enabled(12th card) are the same primitives the radar carve-out
+  ships on. Emulator persists wiped after testing (`pebble kill` + `wipe`).
+  Build green, all 6 platforms.
+- **Post-reboot / hardware checklist addition:** eyeball (1) UP from Main
+  lands on the last weather card with hide on, (2) page dot count drops by
+  one, (3) Settings returns instantly when either toggle turns off, (4) the
+  Clay page: drag-reorder + greyed HideSettingsCard while gate off — then the
+  full real-phone Clay save round-trip already gating this branch.

@@ -11,6 +11,7 @@
 #define KEY_PHONE_MANAGES_CARDS 205  // bool: Clay controls per-card visibility
 #define KEY_AUTO_HIDE_PRECIP   206  // bool: auto-hide precip/radar when dry
 #define KEY_BIG_MODE           207  // bool: Big Mode (large fonts + high contrast)
+#define KEY_HIDE_SETTINGS_CARD 208  // bool: drop Settings card from the carousel
 #define KEY_TOGGLE_BASE        210  // KEY_TOGGLE_BASE + ToggleId
 #define KEY_CARD_ORDER         220  // SETTINGS_TOGGLEABLE_COUNT bytes
 
@@ -30,6 +31,12 @@ static bool s_phone_manages_cards = false;
 
 // Opt-in (Phase 3.2): auto-hide precip/radar when dry. Default off.
 static bool s_auto_hide_precip = false;
+
+// Opt-in: remove the Settings card from the carousel so button scrolling is
+// purely weather cards (all card management then lives in Clay). Default off.
+// Only EFFECTIVE while PhoneManagesCards is also on — see
+// settings_get_settings_card_hidden() for the fail-safe AND.
+static bool s_hide_settings_card = false;
 
 // Big Mode (Phase 3.1 Stage B): accessibility mode — larger fonts, fewer/bigger
 // elements per card, and hardcoded high-contrast colors. Default off, so the
@@ -194,6 +201,9 @@ void settings_load(void) {
   if (persist_exists(KEY_AUTO_HIDE_PRECIP)) {
     s_auto_hide_precip = persist_read_bool(KEY_AUTO_HIDE_PRECIP);
   }
+  if (persist_exists(KEY_HIDE_SETTINGS_CARD)) {
+    s_hide_settings_card = persist_read_bool(KEY_HIDE_SETTINGS_CARD);
+  }
   if (persist_exists(KEY_BIG_MODE)) {
     s_big_mode = persist_read_bool(KEY_BIG_MODE);
   }
@@ -265,6 +275,24 @@ bool settings_get_phone_manages_cards(void) {
 void settings_set_phone_manages_cards(bool enabled) {
   s_phone_manages_cards = enabled;
   persist_write_bool(KEY_PHONE_MANAGES_CARDS, enabled);
+}
+
+bool settings_get_hide_settings_card(void) {
+  return s_hide_settings_card;
+}
+
+void settings_set_hide_settings_card(bool hidden) {
+  s_hide_settings_card = hidden;
+  persist_write_bool(KEY_HIDE_SETTINGS_CARD, hidden);
+}
+
+bool settings_get_settings_card_hidden(void) {
+  // FAIL-SAFE: the Settings card can only ever be dropped from the carousel
+  // while phone management is active, so there is always at least one place
+  // (watch or Clay) that can manage cards. If PhoneManagesCards is turned off
+  // — even with HideSettingsCard still persisted on — the Settings card
+  // returns on the next visibility apply.
+  return s_hide_settings_card && s_phone_manages_cards;
 }
 
 bool settings_get_auto_hide_precip(void) {

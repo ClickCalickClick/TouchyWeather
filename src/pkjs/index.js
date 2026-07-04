@@ -3,7 +3,31 @@
 
 var Clay = require('@rebble/clay');
 var clayConfig = require('./config');
-var clay = new Clay(clayConfig, null, { autoHandleEvents: false });
+
+// Runs inside the Clay config page (serialized with toSource — must be
+// closure-free, ES5). Gates the HideSettingsCard toggle on PhoneManagesCards:
+// hiding the watch's Settings card is only offered while the phone manages
+// cards, mirroring the on-watch fail-safe AND in settings.c.
+var clayCustomFn = function(minified) {
+  var page = this;
+  page.on(page.EVENTS.AFTER_BUILD, function() {
+    var gate = page.getItemByMessageKey('PhoneManagesCards');
+    var hide = page.getItemByMessageKey('HideSettingsCard');
+    if (!gate || !hide) return;
+    function sync() {
+      if (gate.get()) {
+        hide.enable();
+      } else {
+        hide.set(false);
+        hide.disable();
+      }
+    }
+    gate.on('change', sync);
+    sync();
+  });
+};
+
+var clay = new Clay(clayConfig, clayCustomFn, { autoHandleEvents: false });
 // Custom drag-to-reorder card list (must be registered before generateUrl).
 clay.registerComponent(require('./cardorder'));
 
@@ -832,7 +856,7 @@ Pebble.addEventListener('ready', function() {
 // right before the config page opens, so Clay always shows the watch's TRUE
 // state (on-watch toggles/reorders are no longer wiped by a Clay save).
 var WATCH_CARD_STATE_KEYS = [
-  'CardOrder', 'PhoneManagesCards',
+  'CardOrder', 'PhoneManagesCards', 'HideSettingsCard',
   'CardEnabledHours', 'CardEnabledWeek', 'CardEnabledPrecip', 'CardEnabledUV',
   'CardEnabledAQ', 'CardEnabledSun', 'CardEnabledNight', 'CardEnabledGolden',
   'CardEnabledRadar', 'CardEnabledAdvice'

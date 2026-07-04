@@ -24,6 +24,7 @@
 #define IDX_NIGHT  8
 #define IDX_GOLDEN 9
 #define IDX_RADAR  10
+#define IDX_SETTINGS 11
 
 static const int s_toggle_to_card_idx[SETTINGS_TOGGLEABLE_COUNT] = {
   IDX_HOURS, IDX_WEEK, IDX_PRECIP, IDX_UV, IDX_AQ, IDX_SUN, IDX_NIGHT, IDX_GOLDEN, IDX_RADAR,
@@ -36,6 +37,12 @@ static void prv_apply_card_visibility(void) {
     nav_set_enabled(s_toggle_to_card_idx[i],
                     settings_get_effective_enabled((ToggleId)i));
   }
+  // Settings-card opt-out: dropped from traversal + page dots exactly like a
+  // disabled card (the radar carve-out pattern — nav_set_traversal always
+  // back-fills omitted slots, so disabling is the mechanism, not omission).
+  // settings_get_settings_card_hidden() is the gated value: it can only be
+  // true while PhoneManagesCards is on, so Clay can always bring it back.
+  nav_set_enabled(IDX_SETTINGS, !settings_get_settings_card_hidden());
 }
 
 // Builds nav's traversal order from the user's Settings visual order:
@@ -51,7 +58,7 @@ static void prv_sync_nav_traversal(void) {
     if ((int)tid >= SETTINGS_TOGGLEABLE_COUNT) continue;
     order[n++] = s_toggle_to_card_idx[tid];
   }
-  order[n++] = 11;  // Settings
+  order[n++] = IDX_SETTINGS;  // Settings (dropped via nav_set_enabled when hidden)
   nav_set_traversal(order, n);
 }
 

@@ -204,6 +204,13 @@ module.exports = [
       },
       {
         "type": "toggle",
+        "messageKey": "HideSettingsCard",
+        "label": "Hide the Settings card on the watch",
+        "description": "Remove the CARDS (Settings) card from the watch carousel, so scrolling is purely weather cards and all card management happens here. Only available while 'Manage cards from phone' is on — turning that off instantly brings the watch's Settings card back, so you can never lose card control.",
+        "defaultValue": false
+      },
+      {
+        "type": "toggle",
         "messageKey": "AutoHidePrecip",
         "label": "Auto-hide Rain & Radar when dry",
         "description": "When on, the Rain and Radar cards are automatically hidden while no rain is expected in the next few hours, and reappear the moment rain is forecast. Only hides cards you have enabled; it never overrides a card you turned off.",
