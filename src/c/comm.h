@@ -23,9 +23,10 @@ void comm_request_radar(void);
 typedef void (*CommUpdateCb)(void);
 void comm_set_update_callback(CommUpdateCb cb);
 
-// Called after Clay changes per-card visibility (PhoneManagesCards on), so the
-// app can re-apply the on-watch enable flags to nav. Distinct from the redraw
-// callback because it needs the settings→nav mapping the UI layer owns.
+// Called after Clay changes per-card visibility or visual order
+// (PhoneManagesCards on), so the app can re-apply the on-watch enable flags to
+// nav and rebuild the traversal. Distinct from the redraw callback because it
+// needs the settings→nav mapping the UI layer owns.
 typedef void (*CommVisibilityCb)(void);
 void comm_set_visibility_callback(CommVisibilityCb cb);
 

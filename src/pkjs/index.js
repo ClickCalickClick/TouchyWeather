@@ -4,6 +4,8 @@
 var Clay = require('@rebble/clay');
 var clayConfig = require('./config');
 var clay = new Clay(clayConfig, null, { autoHandleEvents: false });
+// Custom drag-to-reorder card list (must be registered before generateUrl).
+clay.registerComponent(require('./cardorder'));
 
 var COND = {
   SUNNY: 0, PARTLY_CLOUDY: 1, CLOUDY: 2, RAIN: 3, SNOW: 4, STORM: 5, FOG: 6

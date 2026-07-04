@@ -132,7 +132,7 @@ module.exports = [
         "type": "toggle",
         "messageKey": "PhoneManagesCards",
         "label": "Manage cards from phone",
-        "description": "Off by default: show/hide cards on the watch (Settings card). Turn this ON to control card visibility from here instead. When you turn it on and save, the toggles below take over — set them to match what you want. Card ORDER is always changed on the watch.",
+        "description": "Off by default: show/hide and reorder cards on the watch (Settings card). Turn this ON to control card visibility and order from here instead — the toggles and the order list below then apply on save. The watch's Settings card keeps working either way; this page always opens showing the watch's current state.",
         "defaultValue": false
       },
       {
@@ -194,6 +194,13 @@ module.exports = [
         "messageKey": "CardEnabledAdvice",
         "label": "Touch & Go (advice)",
         "defaultValue": true
+      },
+      {
+        "type": "cardorder",
+        "messageKey": "CardOrder",
+        "label": "Card order",
+        "description": "Drag the ≡ grip to reorder cards. Applied on save when 'Manage cards from phone' is on. The main weather card is always first and the Settings card always last. Order can also be changed on the watch (hold UP/DOWN on the Settings card).",
+        "defaultValue": "9,0,1,2,3,4,5,6,7,8"
       },
       {
         "type": "toggle",

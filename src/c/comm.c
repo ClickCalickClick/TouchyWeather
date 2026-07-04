@@ -194,8 +194,15 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
       settings_set_enabled(vis_map[i].tid, en);
       vis_changed = true;
     }
-    // Re-apply the (now-updated) enable flags to nav so the rotation and page
-    // dots reflect Clay immediately.
+    // Card ORDER from Clay (the drag-reorder control) — a CSV of ToggleIds.
+    // Strictly validated in settings_apply_order_csv; a bad string is ignored.
+    Tuple *ot = dict_find(iter, MESSAGE_KEY_CardOrder);
+    if (ot && ot->type == TUPLE_CSTRING &&
+        settings_apply_order_csv(ot->value->cstring)) {
+      vis_changed = true;
+    }
+    // Re-apply the (now-updated) enable flags + visual order to nav so the
+    // rotation and page dots reflect Clay immediately.
     if (vis_changed && s_visibility_cb) s_visibility_cb();
   }
   if ((t = dict_find(iter, MESSAGE_KEY_AutoHidePrecip))) {

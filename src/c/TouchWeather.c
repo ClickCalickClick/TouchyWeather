@@ -55,6 +55,13 @@ static void prv_sync_nav_traversal(void) {
   nav_set_traversal(order, n);
 }
 
+// Clay changed per-card visibility and/or the visual order (PhoneManagesCards
+// on): re-apply enable flags to nav and rebuild the traversal in one go.
+static void prv_cards_changed_from_phone(void) {
+  prv_apply_card_visibility();
+  prv_sync_nav_traversal();
+}
+
 // Touch is plumbed for emery / gabbro hardware. Requires firmware >= 5.92.
 // Flip ENABLE_TOUCH to 0 if running against an older simulator that
 // doesn't ship the touch_service API.
@@ -349,8 +356,10 @@ static void prv_init(void) {
   // Load cached data BEFORE first window draw to prevent units flash.
   // The callback must be set first so comm_load_cache() can trigger a redraw.
   comm_set_update_callback(nav_redraw);
-  // Re-apply on-watch enable flags to nav when Clay changes card visibility.
-  comm_set_visibility_callback(prv_apply_card_visibility);
+  // Re-apply enable flags AND rebuild the traversal when Clay changes card
+  // visibility or order (the traversal rebuild is cheap, so one combined
+  // callback covers both kinds of change).
+  comm_set_visibility_callback(prv_cards_changed_from_phone);
   comm_load_cache();
 
   s_window = window_create();

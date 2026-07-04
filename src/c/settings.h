@@ -135,6 +135,13 @@ ToggleId settings_visual_id(int visual_pos);
 bool settings_move_up(int visual_pos);
 bool settings_move_down(int visual_pos);
 
+// Apply a full visual order from a CSV of ToggleIds ("9,0,1,…" — the format
+// the Clay card-order control sends and the watch's state seed pushes).
+// Strictly validated: exactly SETTINGS_TOGGLEABLE_COUNT entries forming a
+// permutation, no junk. Persists on change. Returns true only when the order
+// was valid AND different (callers re-sync the nav traversal on true).
+bool settings_apply_order_csv(const char *csv);
+
 // Visible toggleable rows on the Settings card. On radar-capable platforms
 // this is identical to the full toggleable set. On carved-out platforms the
 // radar row is filtered out of the visible list (radar is force-disabled

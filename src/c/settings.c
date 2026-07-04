@@ -93,6 +93,35 @@ ToggleId settings_visual_id(int visual_pos) {
   return (ToggleId)s_visual_order[visual_pos];
 }
 
+bool settings_apply_order_csv(const char *csv) {
+  if (!csv) return false;
+  uint8_t buf[SETTINGS_TOGGLEABLE_COUNT];
+  int n = 0;
+  const char *p = csv;
+  while (*p && n < SETTINGS_TOGGLEABLE_COUNT) {
+    if (*p < '0' || *p > '9') return false;
+    int v = 0;
+    while (*p >= '0' && *p <= '9') { v = v * 10 + (*p - '0'); p++; }
+    if (v >= SETTINGS_TOGGLEABLE_COUNT) return false;
+    buf[n++] = (uint8_t)v;
+    if (*p == ',') {
+      p++;
+      if (!*p) return false;  // trailing comma
+    } else if (*p) {
+      return false;           // junk between entries
+    }
+  }
+  if (n != SETTINGS_TOGGLEABLE_COUNT || *p) return false;
+  if (!prv_is_valid_permutation(buf)) return false;
+  bool changed = false;
+  for (int i = 0; i < SETTINGS_TOGGLEABLE_COUNT; ++i) {
+    if (s_visual_order[i] != buf[i]) changed = true;
+    s_visual_order[i] = buf[i];
+  }
+  if (changed) prv_persist_order();
+  return changed;
+}
+
 // --- Visible (radar-filtered) view of the toggleable rows ------------------
 // On radar-capable platforms the visible view IS the full view. On carved-out
 // platforms radar is filtered out wherever it currently sits in the visual

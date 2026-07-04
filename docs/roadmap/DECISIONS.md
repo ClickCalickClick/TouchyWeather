@@ -1267,3 +1267,48 @@ cache bump (still 108).
   a fresh push after an on-watch reorder ("0,9,1,…" → restored "9,0,1,…"), and
   `injected watch card state into Clay settings` on `emu-app-config`. Emulator
   persist restored to defaults afterwards. Build green, all 6 platforms.
+
+### SC.2. Card order in Clay — custom drag-reorder component
+- **What:** New custom Clay component `cardorder` (src/pkjs/cardorder.js,
+  registered via `clay.registerComponent`) — a real drag-to-reorder list per
+  Jared's decision, not per-card number dropdowns. Rows show the 10 toggleable
+  cards with a right-side ≡ grip; dragging the grip (touch or mouse) swaps rows
+  live with a translateY follow. Value = CSV of ToggleIds in visual order
+  (same format as the SC.1 seed). Config item sits in the Card Visibility
+  section (messageKey `CardOrder`, default "9,0,1,2,3,4,5,6,7,8" = the watch's
+  s_default_order). Self-contained: no external hosts; Clay inlines the
+  component's template/style/JS into the data-URI config page.
+- **toSource constraint (important for future components):** Clay serializes
+  registered components into the page with `toSource()`, so every function in
+  the component object must be closure-free — the ToggleId→label table is
+  duplicated inside `set()` for that reason. ES5 only (old phone webviews).
+  Also: `initialize()` runs BEFORE the first `set()` (ClayItem.initialize →
+  clayItem.set(value) in clay-config.js `_addItems`), so the drag wiring uses
+  event delegation on the (initially empty) list container.
+- **Watch side:** new `settings_apply_order_csv` (settings.c) — strict parse
+  (exactly 10 entries, digits only, no junk/trailing comma) + the existing
+  `prv_is_valid_permutation`; persists KEY_CARD_ORDER only on change; returns
+  true only on a valid AND different order. comm.c decodes `CardOrder` inside
+  the PhoneManagesCards-gated block (order from Clay obeys the same opt-in as
+  visibility). The visibility callback was widened to a combined
+  `prv_cards_changed_from_phone` (TouchWeather.c) = apply enable flags + rebuild
+  traversal — on-watch UP/DOWN-long reorder keeps working unchanged (both paths
+  share s_visual_order).
+- **Verification (log-based via SC.1's seed echo — the emulator degraded to the
+  known fully-wedged state mid-session, so screenshots of the reordered
+  Settings card were not obtainable; a machine reboot is the documented fix and
+  was not performed autonomously):**
+  - Valid injected order ("8,7,6,5,4,3,2,1,0,9" + PhoneManagesCards:1, temp
+    PKJS injection since emu-app-config isn't scriptable): applied + persisted —
+    the next launch seed echoed exactly that order with PhoneManagesCards:true,
+    reproduced on emery AND diorite.
+  - Invalid orders ("9,9,7,6,5,4,3,2,1,0" dupe; "junk,order"): both ACKed
+    (no crash) and rejected — the relaunch seed still echoed the reversed order.
+  - Traversal rebuild is the same prv_sync_nav_traversal that runs from persist
+    every launch (screenshot-verified all roadmap long).
+  - Emulator persists left polluted by the test were cleared with
+    `pebble kill` + `pebble wipe` after the session's emulator work.
+- **NOT verifiable in the emulator:** the drag interaction itself (config page
+  is an interactive browser). A standalone browser harness is provided for a
+  mouse test (see session summary), and the REAL-PHONE Clay save test remains
+  REQUIRED before ship (added to the hardware sign-off list).
