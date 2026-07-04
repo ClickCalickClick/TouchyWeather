@@ -2,6 +2,7 @@
 #include "../theme.h"
 #include "../icons.h"
 #include "../ui.h"
+#include "../settings.h"
 #include "../anim.h"
 #include "../weather_data.h"
 #include <stdio.h>
@@ -29,6 +30,40 @@ void card_night_sky_draw(GContext *ctx, GRect bounds) {
   // Locked moon palette — never derived from theme.
   const GColor moon_body   = GColorIcterine;     // cream-yellow
   const GColor moon_shadow = GColorOxfordBlue;   // deep navy
+
+  // --- Big Mode (Stage B): bigger moon + phase name, "% LIT" dropped. ---
+  // The moon graphic already shows illumination, so the "% LIT" line goes; the
+  // moon and both phase-name words grow. The locked cream/navy moon palette is
+  // EXEMPT from the Big-Mode contrast collapse — its shadow direction is the
+  // data. Mandatory status banner is KEPT (an earlier plan dropped it — not
+  // allowed). Returns early -> Normal layout below untouched, Big-OFF identical.
+  if (settings_get_big_mode()) {
+    int msize, my, n1y, n2y;
+#if defined(UI_SCREEN_SMALL_RECT)
+    msize = 40; my = 50; n1y = 72; n2y = 100;
+#elif defined(UI_SCREEN_SMALL_ROUND)
+    msize = 40; my = 66; n1y = 88; n2y = 114;
+#elif defined(UI_SCREEN_LARGE_RECT)
+    msize = 64; my = 74; n1y = 116; n2y = 150;
+#else  // UI_SCREEN_LARGE_ROUND
+    msize = 64; my = 92; n1y = 134; n2y = 168;
+#endif
+    GPoint mc = GPoint(bounds.origin.x + W / 2, my);
+    graphics_context_set_fill_color(ctx, moon_shadow);
+    graphics_fill_circle(ctx, mc, msize / 2 + 7);
+    icon_draw_moon_phase(ctx, mc, msize, d->moon_phase, d->moon_illum,
+                         moon_body, moon_shadow);
+    graphics_context_set_text_color(ctx, theme_fg());
+    graphics_draw_text(ctx, d->moon_name1, ui_font_body(),
+        GRect(bounds.origin.x, n1y, W, 34), GTextOverflowModeTrailingEllipsis,
+        GTextAlignmentCenter, NULL);
+    graphics_draw_text(ctx, d->moon_name2, ui_font_header(),
+        GRect(bounds.origin.x, n2y, W, 28), GTextOverflowModeTrailingEllipsis,
+        GTextAlignmentCenter, NULL);
+    ui_draw_auto_banner(ctx, bounds, d->rain_alert_min, d->last_updated,
+                        anim_get_frame());
+    return;
+  }
 
   // Small classes (144x168 / 180x180): the 56/58px moon + title-font phase
   // name stacked the two name words and the illumination line under the bottom
