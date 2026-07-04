@@ -2,6 +2,7 @@
 #include "../theme.h"
 #include "../icons.h"
 #include "../ui.h"
+#include "../settings.h"
 #include "../weather_data.h"
 #include "../anim.h"
 #include <stdio.h>
@@ -14,6 +15,47 @@ void card_uv_draw(GContext *ctx, GRect bounds) {
   // into a horizontally shifted bounds during the 200ms push, so every
   // X coordinate must be translated by ox to move with the card.
   int ox = bounds.origin.x;
+
+  // --- Big Mode (Stage B): drop the arc gauge; giant number + big label. ---
+  // The 49-ish px number is the readable focus once the decorative gauge box is
+  // freed. UV is clamped >=0 (BITHAM has a minus glyph, but UV is physically 0+
+  // and the empty state should read "0 / LOW"). PEAK shows on the large classes
+  // only (room). Mandatory banner kept. Returns early -> Normal gauge layout
+  // below untouched, Big-OFF pixel-identical.
+  if (settings_get_big_mode()) {
+    ui_draw_card_header_with_icon(ctx, bounds, "UV INDEX", theme_fg(),
+                                  UI_HEADER_Y, 18, icon_draw_sun);
+    int uv = d->uv < 0 ? 0 : d->uv;
+    int num_y, label_y;
+#if defined(UI_SCREEN_SMALL_RECT)
+    num_y = 42; label_y = 92;
+#elif defined(UI_SCREEN_SMALL_ROUND)
+    num_y = 56; label_y = 106;
+#elif defined(UI_SCREEN_LARGE_RECT)
+    num_y = 54; label_y = 112;
+#else  // UI_SCREEN_LARGE_ROUND
+    num_y = 74; label_y = 132;
+#endif
+    char nb[8]; snprintf(nb, sizeof(nb), "%d", uv);
+    graphics_context_set_text_color(ctx, theme_fg());
+    graphics_draw_text(ctx, nb, ui_font_number(),
+        GRect(ox, num_y, W, 50), GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+    graphics_draw_text(ctx, uv_label(uv), ui_font_body(),
+        GRect(ox, label_y, W, 32), GTextOverflowModeTrailingEllipsis,
+        GTextAlignmentCenter, NULL);
+#if !defined(UI_SCREEN_SMALL_RECT) && !defined(UI_SCREEN_SMALL_ROUND)
+    if (d->uv_max > 0) {
+      char pb[16]; snprintf(pb, sizeof(pb), "PEAK %d", d->uv_max);
+      graphics_context_set_text_color(ctx, theme_fg());
+      graphics_draw_text(ctx, pb, ui_font_header(),
+          GRect(ox, label_y + 34, W, 24), GTextOverflowModeTrailingEllipsis,
+          GTextAlignmentCenter, NULL);
+    }
+#endif
+    ui_draw_auto_banner(ctx, bounds, d->rain_alert_min, d->last_updated,
+                        anim_get_frame());
+    return;
+  }
 
   // Header: small sun + "UV INDEX".
   int header_y = UI_HEADER_Y;
