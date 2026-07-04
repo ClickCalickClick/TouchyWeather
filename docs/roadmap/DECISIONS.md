@@ -1363,3 +1363,39 @@ cache bump (still 108).
   one, (3) Settings returns instantly when either toggle turns off, (4) the
   Clay page: drag-reorder + greyed HideSettingsCard while gate off — then the
   full real-phone Clay save round-trip already gating this branch.
+
+---
+
+## ☀️ SESSION SUMMARY (2026-07-04) — Settings-in-Clay opt-out, for Jared's review
+
+**3 new commits** on `feature/roadmap-phases` (now 3 ahead of the Big Mode
+verification docs commit), tree clean, `pebble build` green all 6 platforms,
+**nothing pushed**. No cache bump (108 unchanged). Version not bumped.
+
+| Commit | What | Verified |
+|---|---|---|
+| SC.1 `cc2b234` | Watch→Clay card-state seed (order CSV + enables + gate toggles; debounced push on launch/toggle/reorder; PKJS cache + setSettings injection) | ✅ emulator logs: launch seed, toggle push, reorder push, injection on emu-app-config |
+| SC.2 `ac29f35` | Clay drag-reorder (`cardorder` custom component) + CardOrder decode (strict permutation validation, PhoneManagesCards-gated) | ✅ log-based: valid order applied+persisted (emery+diorite), dupe/junk CSVs rejected; ⚠️ drag UI needs browser/phone |
+| SC.3 `471c4cc` | HideSettingsCard (persist 208), gated on PhoneManagesCards, on-watch AND fail-safe + Clay grey-out | ✅ log-based: hide persisted; gate-off leaves raw-on/effective-off (fail-safe state); ⚠️ nav-skip screenshot pending |
+
+**Emulator caveat:** mid-session the emulator degraded to the known
+fully-wedged state (apps instant-exit to "Install an app to continue";
+survived `pebble kill` + `pebble wipe` + cold boots). All decode/persist
+verification switched to the **seed-echo log pattern** (SC.1's launch push
+makes persisted card state observable in `pebble logs` — no screenshot
+needed). That pattern is the recommended fallback for future wedged sessions.
+Machine reboot (the documented fix) was deliberately not performed.
+
+**Post-reboot eyeball list (emulator, ~5 min):** Settings card renders a
+Clay-applied order; UP-from-Main skips a hidden Settings card + dot count
+drops; Settings returns when either gate toggle turns off; `pebble
+emu-app-config` page shows the drag list + greyed HideSettingsCard.
+
+**Real-phone Clay test (REQUIRED before ship, now gating this branch along
+with the standing Phase 4/5/Big Mode hardware sign-off):** open config (must
+show watch's true state), drag-reorder + save with gate on (watch order
+changes), on-watch reorder → reopen config (Clay shows it), hide Settings +
+save, un-gate → Settings returns. A standalone mouse-drag harness embedding
+the shipped cardorder.js was generated for a desktop pre-check
+(cardorder-harness.html, sent in-session; regenerate via the embedded
+generator noted there or just test via emu-app-config post-reboot).
