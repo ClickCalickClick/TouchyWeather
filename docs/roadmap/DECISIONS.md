@@ -1223,3 +1223,47 @@ cleared it. Big-ON was then screenshot-verified:
 - Still pending (unchanged): the standing Phase 4 + Phase 5 hardware sign-off, a
   real low-vision legibility/contrast pass, and Radar's live bitmap+crosshair on a
   phone-connected build.
+
+---
+
+## Settings-in-Clay opt-out (2026-07-04) — the deferred feature, built in the decided order
+
+Session start: entire roadmap feature-complete (Big Mode Stage B verified), tree
+clean, nothing pushed. This session builds the deferred "Settings-in-Clay
+opt-out" per Jared's baked decisions: (1) watch→Clay seed first, (2) Clay card
+REORDER second (custom drag component), (3) HideSettingsCard opt-in last, gated
+on PhoneManagesCards with an on-watch fail-safe. No WeatherData change → no
+cache bump (still 108).
+
+### SC.1. Watch→Clay card-state seed (the keystone)
+- **What:** The watch now PUSHES its card order + per-card enable flags +
+  PhoneManagesCards to PKJS (new `comm_send_card_state`): once ~1s after every
+  foreground launch, and after every on-watch Settings change (row toggle,
+  UP/DOWN-long reorder). PKJS caches the state in localStorage
+  (`watchCardState`); `showConfiguration` injects it into Clay's persisted
+  settings via the public `clay.setSettings()` (which writes the same
+  `clay-settings` store `generateUrl()` reads) before opening the page. Clay
+  therefore always opens showing the watch's TRUE current card state — a Clay
+  save can no longer silently wipe on-watch card config. This closes the Phase
+  2.2 "reverse/upgrade path" note.
+- **Wire format:** order rides on a new `CardOrder` message key as a CSV of
+  ToggleIds ("9,0,1,…" = the Settings-card visual order); enables reuse the ten
+  `CardEnabled*` keys (0/1) so PKJS can inject them 1:1 into Clay's toggle
+  values (as booleans — the checkbox manipulator stores booleans). `CardOrder`
+  doubles as the phone→watch order key in SC.2, and its presence identifies a
+  watch→phone state push in the PKJS `appmessage` handler (weather fetch is
+  never triggered by it).
+- **Delivery discipline:** the push is debounced 900ms so a chain of reorder
+  long-presses coalesces into one message, and retries up to 5× (2s apart) if
+  the outbox is busy (the launch push races the 750ms initial-refresh request).
+  Deliberately best-effort — a lost push self-heals on the next change/launch.
+  Background (wakeup) launches do NOT seed (keeps the 28s budget clean).
+- **PhoneManagesCards NOT retired:** the 2.2 entry said the seed would allow
+  retiring the master toggle; it is deliberately KEPT — SC.3 repurposes it as
+  the required gate for hiding the Settings card (now load-bearing).
+- **Verification (emulator, basalt):** PKJS log shows the launch seed
+  (`watch card state cached: {"CardOrder":"9,0,…"`, all enables true), a fresh
+  push after an on-watch row toggle (CardEnabledAdvice:false → true on revert),
+  a fresh push after an on-watch reorder ("0,9,1,…" → restored "9,0,1,…"), and
+  `injected watch card state into Clay settings` on `emu-app-config`. Emulator
+  persist restored to defaults afterwards. Build green, all 6 platforms.

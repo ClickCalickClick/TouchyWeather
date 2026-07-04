@@ -480,6 +480,74 @@ void comm_request_radar(void) {
   app_message_outbox_send();
 }
 
+// --- Watch→Clay card-state seed ---------------------------------------------
+// PKJS caches this state and injects it into Clay's persisted settings before
+// the config page opens, so Clay always shows the watch's true card config
+// (and a Clay save can no longer silently wipe on-watch changes).
+
+#define CARD_STATE_DEBOUNCE_MS 900
+#define CARD_STATE_RETRY_MS    2000
+#define CARD_STATE_MAX_TRIES   5
+
+static AppTimer *s_card_state_timer = NULL;
+static int s_card_state_tries = 0;
+
+static void prv_send_card_state_now(void *ctx) {
+  (void)ctx;
+  s_card_state_timer = NULL;
+  DictionaryIterator *iter;
+  if (app_message_outbox_begin(&iter) != APP_MSG_OK) {
+    // Outbox busy (a refresh request may still be in flight). Retry a few
+    // times, then give up — the next change or launch re-sends anyway.
+    if (++s_card_state_tries < CARD_STATE_MAX_TRIES) {
+      s_card_state_timer =
+          app_timer_register(CARD_STATE_RETRY_MS, prv_send_card_state_now, NULL);
+    }
+    return;
+  }
+
+  // Visual order as a CSV of ToggleIds ("9,0,1,..."), matching the format the
+  // Clay card-order control round-trips back.
+  char order_csv[SETTINGS_TOGGLEABLE_COUNT * 2 + 1];
+  int pos = 0;
+  for (int i = 0; i < SETTINGS_TOGGLEABLE_COUNT; ++i) {
+    if (i) order_csv[pos++] = ',';
+    order_csv[pos++] = (char)('0' + (int)settings_visual_id(i));
+  }
+  order_csv[pos] = '\0';
+  dict_write_cstring(iter, MESSAGE_KEY_CardOrder, order_csv);
+
+  // Per-card enable flags, keyed exactly like the Clay toggles so PKJS can
+  // inject them 1:1. Not static: MESSAGE_KEY_* are runtime symbols.
+  const struct { uint32_t key; ToggleId tid; } vis_map[] = {
+    { MESSAGE_KEY_CardEnabledHours,  TOGGLE_HOURS  },
+    { MESSAGE_KEY_CardEnabledWeek,   TOGGLE_WEEK   },
+    { MESSAGE_KEY_CardEnabledPrecip, TOGGLE_PRECIP },
+    { MESSAGE_KEY_CardEnabledUV,     TOGGLE_UV     },
+    { MESSAGE_KEY_CardEnabledAQ,     TOGGLE_AQ     },
+    { MESSAGE_KEY_CardEnabledSun,    TOGGLE_SUN    },
+    { MESSAGE_KEY_CardEnabledNight,  TOGGLE_NIGHT  },
+    { MESSAGE_KEY_CardEnabledGolden, TOGGLE_GOLDEN },
+    { MESSAGE_KEY_CardEnabledRadar,  TOGGLE_RADAR  },
+    { MESSAGE_KEY_CardEnabledAdvice, TOGGLE_ADVICE },
+  };
+  for (unsigned i = 0; i < sizeof(vis_map) / sizeof(vis_map[0]); ++i) {
+    dict_write_uint8(iter, vis_map[i].key,
+                     settings_get_enabled(vis_map[i].tid) ? 1 : 0);
+  }
+  dict_write_uint8(iter, MESSAGE_KEY_PhoneManagesCards,
+                   settings_get_phone_manages_cards() ? 1 : 0);
+  dict_write_end(iter);
+  app_message_outbox_send();
+}
+
+void comm_send_card_state(void) {
+  s_card_state_tries = 0;
+  if (s_card_state_timer) app_timer_cancel(s_card_state_timer);
+  s_card_state_timer =
+      app_timer_register(CARD_STATE_DEBOUNCE_MS, prv_send_card_state_now, NULL);
+}
+
 void comm_set_update_callback(CommUpdateCb cb) {
   s_update_cb = cb;
 }
@@ -749,6 +817,11 @@ void comm_init(void) {
       APP_LOG(APP_LOG_LEVEL_INFO, "BG: Scheduling initial wakeup (%d secs)", bg_interval);
     }
   }
+
+  // Seed the phone with the watch's card order + visibility on every launch,
+  // so the Clay config page opens on the watch's true state. The debounce
+  // (plus busy retries) keeps it clear of the 750ms initial refresh request.
+  comm_send_card_state();
 }
 
 void comm_deinit(void) {

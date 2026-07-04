@@ -194,6 +194,7 @@ static void prv_select_click(ClickRecognizerRef r, void *ctx) {
     settings_set_enabled(tid, now);
     nav_set_enabled(s_toggle_to_card_idx[tid], now);
     nav_redraw();
+    comm_send_card_state();  // keep the phone's Clay seed in sync
     return;
   }
   // Main card: manual weather refresh (Task 5.1). This is the only manual
@@ -260,6 +261,7 @@ static void prv_up_long(ClickRecognizerRef r, void *ctx) {
   if (settings_move_up(settings_cursor())) {
     prv_sync_nav_traversal();
     nav_redraw();
+    comm_send_card_state();  // debounced, so chained holds coalesce
   }
 }
 
@@ -271,6 +273,7 @@ static void prv_down_long(ClickRecognizerRef r, void *ctx) {
   if (settings_move_down(settings_cursor())) {
     prv_sync_nav_traversal();
     nav_redraw();
+    comm_send_card_state();  // debounced, so chained holds coalesce
   }
 }
 

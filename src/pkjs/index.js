@@ -825,11 +825,44 @@ Pebble.addEventListener('ready', function() {
   }
 });
 
+// Watch→Clay seed: message keys the watch pushes to describe its current card
+// config. Cached in localStorage and injected into Clay's persisted settings
+// right before the config page opens, so Clay always shows the watch's TRUE
+// state (on-watch toggles/reorders are no longer wiped by a Clay save).
+var WATCH_CARD_STATE_KEYS = [
+  'CardOrder', 'PhoneManagesCards',
+  'CardEnabledHours', 'CardEnabledWeek', 'CardEnabledPrecip', 'CardEnabledUV',
+  'CardEnabledAQ', 'CardEnabledSun', 'CardEnabledNight', 'CardEnabledGolden',
+  'CardEnabledRadar', 'CardEnabledAdvice'
+];
+
+function cacheWatchCardState(p) {
+  var state = {};
+  try {
+    state = JSON.parse(localStorage.getItem('watchCardState') || '{}');
+  } catch (e) { state = {}; }
+  for (var i = 0; i < WATCH_CARD_STATE_KEYS.length; i++) {
+    var k = WATCH_CARD_STATE_KEYS[i];
+    if (p[k] === undefined) continue;
+    // CardOrder rides as a CSV string; everything else is a 0/1 flag that
+    // Clay stores as a boolean (checkbox manipulator).
+    state[k] = (k === 'CardOrder') ? String(p[k]) : !!p[k];
+  }
+  localStorage.setItem('watchCardState', JSON.stringify(state));
+  console.log('watch card state cached: ' + JSON.stringify(state));
+}
+
 Pebble.addEventListener('appmessage', function(e) {
   var p = (e && e.payload) || {};
   if (p.RadarRequest) {
     console.log('appmessage: RadarRequest');
     fetchRadar();
+    return;
+  }
+  // Watch card-state seed (identified by the CardOrder key, which only the
+  // watch's state push carries watch→phone). Cache and stop — never fetch.
+  if (p.CardOrder !== undefined) {
+    cacheWatchCardState(p);
     return;
   }
   // The watch reports its system clock style with each refresh request so the
@@ -849,6 +882,18 @@ Pebble.addEventListener('appmessage', function(e) {
 });
 
 Pebble.addEventListener('showConfiguration', function() {
+  // Inject the watch's cached card state into Clay's persisted settings so
+  // the page opens showing the watch's true order/visibility. setSettings
+  // writes the same 'clay-settings' store generateUrl() reads.
+  try {
+    var watchState = JSON.parse(localStorage.getItem('watchCardState') || 'null');
+    if (watchState) {
+      clay.setSettings(watchState);
+      console.log('injected watch card state into Clay settings');
+    }
+  } catch (e) {
+    console.log('watch card state inject skipped: ' + e.message);
+  }
   Pebble.openURL(clay.generateUrl());
 });
 
