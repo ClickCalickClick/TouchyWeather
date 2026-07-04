@@ -1121,3 +1121,83 @@ remove data with no fallback and should be his call:
 - **Everything still rides the unmerged branch** — Phase 4 + Phase 5 hardware
   sign-off still gates the merge; Big Mode adds its own hardware-pass item
   (legibility/contrast on a real low-vision pass, and the enlarged pill on device).
+
+## Phase 3.1 Stage B — Big Mode spread to the remaining 9 cards (2026-07-03/04, night)
+
+Continued on `feature/roadmap-phases`. After reviewing the mechanism + Main/6
+Hours, **Jared rejected all three of Fable's product-level cuts** and had Fable
+(the same planning subagent, context intact) revise the design; then the spread
+was implemented. **9 more commits** (one per card, Stage B 5/N–13/N), tree clean,
+`pebble build` green for all 6, **nothing pushed**. The three constraints Jared
+set (now the durable rules):
+
+1. **Golden Hour must keep all four milestones** (no blue-hour cut; no modal
+   exists as a fallback).
+2. **The status banner is mandatory on every weather card** — it can never be
+   dropped to make room. (Settings is the one exemption Jared confirmed — it's a
+   config screen with a rotating footer hint, not weather status; AskUserQuestion.)
+3. **Radar stays in the Big-Mode rotation** (it's already a full-screen bitmap).
+
+### Fable's revision (the design that was implemented)
+- **Golden Hour → a 2×2 grid** (rows blue/gold × columns AM/PM) so all four times
+  are visible at once — chosen over pagination (an accessibility mode shouldn't
+  hide half the data behind a gesture). Band identity is carried by **shape**
+  (filled□ = blue, outline□ = gold) so it survives the contrast collapse; the
+  AM/PM column header lets the " AM"/" PM" suffix be stripped. This is the novel/
+  highest-risk layout.
+- **Night Sky + Advice → banner restored**, content re-fit above the (now taller)
+  banner: Night Sky shrinks the moon on small classes and drops only "% LIT";
+  Advice drops the tier badge, caps the headline to one line, and lets the quip
+  wrap in the freed space.
+- **Radar → banner ADDED.** Fable's re-read caught that **radar.c never drew a
+  status banner at all** (only a RAINVIEWER footer) — so it's the single card that
+  needed the banner *added*, done in Big Mode only (Normal radar unchanged).
+
+### Per-card implementation notes (all early-return `if (big) {…}` branches)
+- **Week** (5/N): 3 days small / 5 large, `day + ↑high ↓low` with arrows replacing
+  the hue-coded high/low; `ui_font_header` (18B/24B) because two temps per row is
+  too wide for 24B on 144px; icon dropped on small, POP% + days 4–5-on-small → modal.
+- **Precipitation** (6/N): 3 fat bars (Now/+2h/+4h); +1h/+3h → modal.
+- **UV** (7/N) + **Air Quality** (8/N): drop the arc gauge, giant `ui_font_number`
+  + big `ui_font_body` label; PEAK/pollen on large only. **AQI keeps its EPA
+  category color** on the number+label (opts out of the contrast collapse — the one
+  hue that IS the data; note the MODERATE band routes through `theme_accent_orange`
+  which still collapses to fg, an accepted minor degrade since the word shows).
+- **Sun Cycle** (9/N): font-bump — both rows, bigger icons, times auto-scale to
+  BITHAM_30_BLACK via `ui_font_title`. (Skipped Fable's large-only SUNRISE/SUNSET
+  captions as a minor simplification.)
+- **Night Sky** (10/N), **Golden Hour** (11/N), **Advice** (12/N), **Radar** (13/N):
+  as in the revision above.
+
+### ⚠️ Verification status — HONEST, please read
+- **Build green on all 6 platforms** after every commit.
+- **Big-OFF parity: guaranteed by construction** for all 9 — each is an early-return
+  `if (settings_get_big_mode()) {…return;}` inserted *before* verbatim Normal code
+  (radar uses `big ? new : orig` inline ternaries resolving to the exact originals).
+  No Normal-path code was touched. (Main/6 Hours Big-OFF were screenshot-verified
+  earlier; the same mechanical guarantee covers these.)
+- **Big-ON per-card screenshots: NOT captured this session — BLOCKED by emulator
+  failure.** Partway through the spread the emulator's **app-launch RPC died**: on
+  every platform, `pebble install` reports success but the watch stays on "Install
+  an app to continue" and phonesim screenshots time out. Confirmed **environmental,
+  not a code regression** — reverting to Big-OFF (the shipped Normal code) fails to
+  launch identically, and VNC framebuffer captures (which bypass the phonesim) also
+  show the app never running. Earlier the same session, with the emulator healthy,
+  Big-ON rendered correctly for **Main + 6 Hours on emery, gabbro AND basalt** — the
+  9 spread cards reuse that identical, proven early-return pattern, but their
+  individual layouts (positions/overflow) are **computed, not yet eyeballed.**
+- **First things to eyeball once an emulator/device is healthy** (highest layout
+  risk): (1) **Golden Hour** 2×2 grid fit on 144px (two times + shape per row is
+  tight — the cluster clamps to margins), (2) **Advice** quip clipping on small-rect
+  (~2-line box at 24B — the known limit; a short-phrase small-class pool is the
+  fix), (3) **Week** two-temp rows on 144px, (4) **Radar** banner overlapping the
+  bottom of the 160px bitmap on emery/gabbro (accepted, consistent with how the
+  footer already overlays the image), (5) the UV/AQI giant number vertical centering.
+
+### Still open / next
+- **Visual pass on the 9 spread cards** (emery + gabbro + a small class) once the
+  emulator is healthy or on hardware — tune the per-card anchors flagged above.
+  Nothing is pushed, so amend/fixup commits are cheap.
+- **Big Mode is now feature-complete across all 12 cards** (Settings intentionally
+  exempt). Remaining before merge: the visual pass above, plus the standing Phase 4
+  + Phase 5 hardware sign-off and a real low-vision legibility/contrast pass.
