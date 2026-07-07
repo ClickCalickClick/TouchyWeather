@@ -113,10 +113,21 @@ static void touch_handler(const TouchEvent *event, void *context) {
       break;
     case TouchEvent_Liftoff: {
       if (!s_tracking) break;
-      // Detail modal: a downward flick dismisses it; any other touch is
-      // swallowed so card nav stays locked while it's open.
+      // Detail modal: horizontal swipes page (Week detail), a downward
+      // flick dismisses; any other touch is swallowed so card nav stays
+      // locked while it's open.
       if (detail_modal_is_active()) {
-        if (event->y - s_start_y > 30) detail_modal_close();
+        int16_t mdx = event->x - s_start_x;
+        int16_t mdy = event->y - s_start_y;
+        int16_t madx = mdx < 0 ? -mdx : mdx;
+        int16_t mady = mdy < 0 ? -mdy : mdy;
+        if (madx > 30 && madx > mady) {
+          anim_kick();
+          if (mdx < 0) detail_modal_handle_down();  // swipe left = next page
+          else         detail_modal_handle_up();    // swipe right = previous
+        } else if (mdy > 30 && mady > madx) {
+          detail_modal_close();
+        }
         s_tracking = false;
         break;
       }

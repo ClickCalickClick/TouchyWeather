@@ -205,7 +205,9 @@ static void prv_draw_precip(GContext *ctx) {
   int top = prv_draw_chrome(ctx, "RAINFALL", icon_draw_droplet);
 
   int margin = UI_MARGIN_X + 6;
-  // Headline: "RAIN IN Nh" or "NO RAIN SOON".
+  // Headline: "RAIN IN Nh", else a POP-based chance if any upcoming hour
+  // looks likely, else "NO RAIN SOON".
+  const int POP_HEADLINE_MIN = 40;
   char head[24];
   if (d->rain_alert_min >= 0) {
     int m = d->rain_alert_min;
@@ -213,6 +215,12 @@ static void prv_draw_precip(GContext *ctx) {
     else        snprintf(head, sizeof(head), "RAIN IN %dH", (m + 30) / 60);
   } else {
     snprintf(head, sizeof(head), "NO RAIN SOON");
+    for (int i = 0; i < 6; i++) {  // hours_pop[i] is +1h..+6h out
+      if (d->hours_pop[i] >= POP_HEADLINE_MIN) {
+        snprintf(head, sizeof(head), "%d%% CHANCE IN %dH", d->hours_pop[i], i + 1);
+        break;
+      }
+    }
   }
   graphics_context_set_text_color(ctx, theme_fg());
   graphics_draw_text(ctx, head, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
