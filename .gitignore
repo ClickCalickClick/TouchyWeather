@@ -23,6 +23,9 @@ friction.log
 .env.*
 *.env.local
 
+# Proxy key — never commit (template: src/pkjs/secrets.js.example)
+src/pkjs/secrets.js
+
 # Local planning docs
 plans/
 

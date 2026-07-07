@@ -108,7 +108,7 @@ Rule: touch is always an *enhancement* — every action must have a button path 
 
 Not in the original backlog; surfaced during review.
 
-1. **Plaintext proxy secret in a public repo.** `src/pkjs/index.js` (~lines 537–546) hardcodes `key=tw-radar-prod-Xk7nQ2v9LpR4Mj8a` for the radar/pollen/track proxy endpoints — with a code comment reminding to remove it before publishing to a public repo. Under the repo's public + CC BY-NC status, this secret is exposed. Rotate it and move it out of the committed client (e.g. build-time injection or an unauthenticated-but-rate-limited proxy).
+1. **Plaintext proxy secret in a public repo.** `src/pkjs/index.js` (~lines 537–546) hardcodes `key=tw-radar-prod-…` (redacted) for the radar/pollen/track proxy endpoints — with a code comment reminding to remove it before publishing to a public repo. Under the repo's public + CC BY-NC status, this secret is exposed. Rotate it and move it out of the committed client (e.g. build-time injection or an unauthenticated-but-rate-limited proxy).
 2. **Redundant theme persistence.** Theme is written to persist key `1` (`theme.c`) *and* key `200` (`settings.c`), and `settings_save_theme` appears to be uncalled. Consolidate to one source of truth to avoid drift.
 
 These are independent of the feature work and can land anytime.

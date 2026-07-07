@@ -4,6 +4,9 @@ All notable changes to TouchyWeather. The top entry is the newest release; the
 build reads it to generate the in-app "What's New" screen, so keep the most
 recent version at the top with `## x.y.z` and one bullet (`- `) per line.
 
+## 1.11.2
+- Behind the scenes: anonymous usage stats now count the app and the new TouchyWeather watch face separately.
+
 ## 1.11.1
 - Background auto-refresh now keeps working after you update or reinstall the app.
 

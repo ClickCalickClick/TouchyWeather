@@ -634,21 +634,28 @@ function locateAndFetch() {
 // ----------------------------------------------------------------------
 
 var RADAR_CHUNK_SIZE = 1500;
-// Shared secret for the Vercel proxy (RADAR_SECRET env var). Kept URL-safe
-// (no '#', '&', '@', etc.) so it can be embedded directly in a query string
-// without encoding gymnastics. Prior values containing '#' were silently
-// truncated by the HTTP client at the fragment marker, causing 401s.
-// NOTE: remove the ?key=... before committing to a public repo.
-var RADAR_PROXY_URL = 'https://touchyweather-radar-proxy.vercel.app/api/radar?key=tw-radar-prod-Xk7nQ2v9LpR4Mj8a';
+// Shared secret for the Vercel proxy (RADAR_SECRET env var), loaded from
+// gitignored secrets.js (template: secrets.js.example) so the key never
+// lands in the public repo. Kept URL-safe (no '#', '&', '@', etc.) so it can
+// be embedded directly in a query string without encoding gymnastics. Prior
+// values containing '#' were silently truncated by the HTTP client at the
+// fragment marker, causing 401s. With an empty key the proxy endpoints just
+// 401 and radar/pollen/analytics degrade gracefully.
+var PROXY_KEY = require('./secrets').PROXY_KEY;
+function proxyUrl(path) {
+  var u = 'https://touchyweather-radar-proxy.vercel.app/api/' + path;
+  return PROXY_KEY ? u + '?key=' + PROXY_KEY : u;
+}
+var RADAR_PROXY_URL = proxyUrl('radar');
 
 // Pollen proxy shares the same Vercel project + RADAR_SECRET auth key
 // as the radar endpoint, so the URL differs only in the /api path.
-var POLLEN_PROXY_URL = 'https://touchyweather-radar-proxy.vercel.app/api/pollen?key=tw-radar-prod-Xk7nQ2v9LpR4Mj8a';
+var POLLEN_PROXY_URL = proxyUrl('pollen');
 
 // Anonymous analytics ping. Same Vercel project + RADAR_SECRET auth key as
 // radar/pollen. The server hashes the id and stores only aggregate counts —
 // nothing identifiable leaves the device. See proxy/api/track.js.
-var TRACK_PROXY_URL = 'https://touchyweather-radar-proxy.vercel.app/api/track?key=tw-radar-prod-Xk7nQ2v9LpR4Mj8a';
+var TRACK_PROXY_URL = proxyUrl('track');
 
 // Pollen is throttled to one proxy fetch per 6 hours per device.
 // Between fetches the last known level is re-sent from localStorage so
@@ -758,7 +765,7 @@ function trackPing(lat, lon) {
     };
     req.onerror = function() { console.log('track err'); };
     req.ontimeout = function() { console.log('track timeout'); };
-    req.send(JSON.stringify({ id: id, lat: rLat, lon: rLon }));
+    req.send(JSON.stringify({ id: id, lat: rLat, lon: rLon, variant: 'app' }));
   } catch (e) {
     console.log('track exception: ' + e.message);
   }

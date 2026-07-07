@@ -100,11 +100,27 @@ def configure(ctx):
     ctx.load('pebble_sdk')
 
 
+def ensure_pkjs_secrets(ctx):
+    """Create src/pkjs/secrets.js from secrets.js.example when missing.
+
+    secrets.js holds the real proxy key and is gitignored so it never lands
+    in the public repo; this hook lets a fresh clone compile out of the box
+    (with an empty key — proxy-backed features just 401 until one is added).
+    """
+    if ctx.path.find_node('src/pkjs/secrets.js') is None:
+        example = ctx.path.find_node('src/pkjs/secrets.js.example')
+        if example is not None:
+            ctx.path.make_node('src/pkjs/secrets.js').write(example.read())
+
+
 def build(ctx):
     ctx.load('pebble_sdk')
 
     # Regenerate src/c/version_gen.h from CHANGELOG.md before the C compile.
     generate_version_header(ctx)
+
+    # Materialize the gitignored secrets module before the JS glob runs.
+    ensure_pkjs_secrets(ctx)
 
     build_worker = os.path.exists('worker_src')
     binaries = []
