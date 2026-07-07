@@ -4,6 +4,7 @@
 #include "settings.h"
 #include "refresh_sheet.h"
 #include "anim.h"
+#include "glance.h"
 #include "cards/cards.h"
 #include <string.h>
 #include <stdlib.h>
@@ -501,6 +502,27 @@ void comm_request_refresh(void) {
   app_message_outbox_send();
 }
 
+// One-shot retry when a refresh-sentinel send fails (typically PKJS not up
+// yet at the 750ms initial request). Without it, a reinstall that wiped the
+// watch's cache but left the phone's lastFetchAt fresh could end up with no
+// fetch at all: the sentinel dies here and PKJS `ready` skips as "fresh".
+static bool s_refresh_retry_done = false;
+
+static void prv_refresh_retry(void *ctx) {
+  (void)ctx;
+  APP_LOG(APP_LOG_LEVEL_INFO, "Refresh sentinel send failed, retrying once");
+  comm_request_refresh();
+}
+
+static void prv_outbox_failed(DictionaryIterator *iter, AppMessageResult reason,
+                              void *context) {
+  (void)reason; (void)context;
+  if (s_refresh_retry_done) return;
+  if (!iter || !dict_find(iter, MESSAGE_KEY_LastUpdated)) return;
+  s_refresh_retry_done = true;  // per-launch: one retry, never a loop
+  app_timer_register(2000, prv_refresh_retry, NULL);
+}
+
 void comm_request_radar(void) {
   DictionaryIterator *iter;
   if (app_message_outbox_begin(&iter) != APP_MSG_OK) return;
@@ -744,6 +766,11 @@ static void prv_wakeup_handler(WakeupId id, int32_t reason) {
 static void prv_bg_exit(void *data) {
   (void)data;
   APP_LOG(APP_LOG_LEVEL_INFO, "BG: Closing AppMessage and exiting");
+  // Refresh the launcher glance with whatever this background fetch landed.
+  // On timeout/drop nothing arrived (last_updated stays 0 — bg launches
+  // never load the cache), so glance_update()'s guard makes it a no-op and
+  // the previous slice survives untouched.
+  glance_update();
   app_message_deregister_callbacks();
   s_bg_exit_timer = NULL;
   // Pop (and free) the keep-alive window so the window stack empties and
@@ -796,6 +823,7 @@ void comm_background_init(void) {
   // Open AppMessage (triggers PKJS ready event)
   app_message_register_inbox_received(prv_inbox_received);
   app_message_register_inbox_dropped(prv_inbox_dropped);
+  app_message_register_outbox_failed(prv_outbox_failed);
   app_message_open(2048, 256);
 
   // Request weather
@@ -810,6 +838,7 @@ void comm_init(void) {
   // Cache loading now happens separately in prv_init(), before window push.
   app_message_register_inbox_received(prv_inbox_received);
   app_message_register_inbox_dropped(prv_inbox_dropped);
+  app_message_register_outbox_failed(prv_outbox_failed);
   // Inbox bumped 1024 -> 2048 in Phase 12 to fit a 1500-byte radar
   // pixel chunk plus message tuple overhead.
   app_message_open(2048, 256);

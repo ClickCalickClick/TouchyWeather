@@ -9,6 +9,7 @@
 #include "refresh_sheet.h"
 #include "detail_modal.h"
 #include "update_notes.h"
+#include "glance.h"
 #include "cards/cards.h"
 
 // Card-registry indices for the toggleable cards. Must match the
@@ -400,6 +401,9 @@ static void prv_deinit(void) {
   comm_deinit();
   update_notes_deinit();
   window_destroy(s_window);
+  // Publish the launcher glance on the way out so the launcher subtitle
+  // shows the freshest temp/condition we have.
+  glance_update();
 }
 
 int main(void) {

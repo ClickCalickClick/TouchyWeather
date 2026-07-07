@@ -308,7 +308,25 @@ function xhr(url, cb) {
 // BigDataCloud's keyless client endpoint. Always invokes `done` with a
 // string: the freshly resolved name, or the last cached name, or '' —
 // never blocks or fails the weather fetch.
+//
+// Cached by ~1.1km coordinate cell (2 decimal places) for 24h — city names
+// rarely change, and this was previously a network hit on EVERY refresh.
+// Moving to a different cell misses the cache and refetches, so travel is
+// handled by construction. A failed or empty resolve never refreshes the
+// timestamp, so the next fetch retries.
+var GEO_TTL_MS = 24 * 60 * 60 * 1000;
+
 function reverseGeocode(lat, lon, done) {
+  var cellKey = lat.toFixed(2) + ',' + lon.toFixed(2);
+  var cachedName = localStorage.getItem('lastLocationName') || '';
+  var cachedAt = parseInt(localStorage.getItem('geoCacheAt') || '0', 10);
+  if (cachedName && cachedAt > 0 &&
+      localStorage.getItem('geoCacheCoords') === cellKey &&
+      Date.now() - cachedAt < GEO_TTL_MS) {
+    console.log('geocode cache hit: ' + cachedName);
+    done(cachedName);
+    return;
+  }
   var url = 'https://api.bigdatacloud.net/data/reverse-geocode-client' +
             '?latitude=' + lat + '&longitude=' + lon + '&localityLanguage=en';
   xhr(url, function(err, data) {
@@ -319,6 +337,8 @@ function reverseGeocode(lat, lon, done) {
     var name = data.city || data.locality || data.principalSubdivision || '';
     if (name) {
       localStorage.setItem('lastLocationName', name);
+      localStorage.setItem('geoCacheCoords', cellKey);
+      localStorage.setItem('geoCacheAt', String(Date.now()));
     } else {
       name = localStorage.getItem('lastLocationName') || '';
     }
@@ -355,7 +375,7 @@ function fetchWeather(lat, lon) {
   // calls back with a string, so a geocode failure never blocks weather.
   reverseGeocode(lat, lon, function(locName) {
   xhr(fc, function(err, data) {
-    if (err) { console.log('forecast err: ' + err.message); return; }
+    if (err) { console.log('forecast err: ' + err.message); fetchDone(); return; }
     xhr(aq, function(_e2, aqd) {
       var msg = {};
       msg.LocationName = (locName || '').substring(0, 31);
@@ -535,24 +555,60 @@ function fetchWeather(lat, lon) {
         }
       } catch (e) {
         console.log('parse err: ' + e.message);
+        fetchDone();
         return;
       }
       Pebble.sendAppMessage(msg,
         function() {
           console.log('weather sent');
+          // Successful round-trip: record freshness for the `ready` gate.
+          localStorage.setItem('lastFetchAt', String(Date.now()));
+          fetchDone();
           // Only call Google proxy for non-European locations.
           if (!gotPollenFromOpenMeteo) {
             fetchPollen(lat, lon);
           }
         },
-        function(e) { console.log('send fail: ' + JSON.stringify(e)); }
+        function(e) {
+          console.log('send fail: ' + JSON.stringify(e));
+          fetchDone();
+        }
       );
     });
   });
   });
 }
 
+// Fetch dedupe. Launch used to double-fetch: PKJS `ready` fired one chain
+// AND the C side's 750ms LastUpdated sentinel fired another. The in-flight
+// guard absorbs whichever arrives second; `lastFetchAt` (set only on a
+// successful send) lets `ready` skip entirely when data is fresh, mirroring
+// the C side's 15-minute open-refresh gate. The sentinel path stays ungated
+// by freshness — it's the fail-safe for wiped watch storage, manual refresh
+// and background wakeups (min bg interval 30min > gate, never starved).
+var FETCH_FRESH_MS = 15 * 60 * 1000;      // matches comm.c threshold_secs
+var FETCH_IN_FLIGHT_MS = 20000;           // xhr timeout is 15s; self-heals
+var fetchStartedAt = 0;
+
+function fetchDone() { fetchStartedAt = 0; }
+
+function maybeInitialFetch() {
+  var last = parseInt(localStorage.getItem('lastFetchAt') || '0', 10);
+  var age = Date.now() - last;
+  if (last > 0 && age < FETCH_FRESH_MS) {
+    console.log('ready: last fetch ' + Math.round(age / 1000) +
+                's ago, skipping');
+    return;
+  }
+  locateAndFetch();
+}
+
 function locateAndFetch() {
+  if (Date.now() - fetchStartedAt < FETCH_IN_FLIGHT_MS) {
+    console.log('fetch already in flight, skipping');
+    return;
+  }
+  fetchStartedAt = Date.now();
   var override = localStorage.getItem('locationOverride');
   if (override) {
     var parts = override.split(',');
@@ -858,10 +914,10 @@ Pebble.addEventListener('ready', function() {
   if (interval !== null) {
     console.log('Re-syncing BackgroundUpdateInterval=' + interval + ' to watch');
     Pebble.sendAppMessage({ BackgroundUpdateInterval: interval },
-      function() { locateAndFetch(); },
-      function() { locateAndFetch(); });
+      function() { maybeInitialFetch(); },
+      function() { maybeInitialFetch(); });
   } else {
-    locateAndFetch();
+    maybeInitialFetch();
   }
 });
 
@@ -937,8 +993,24 @@ Pebble.addEventListener('showConfiguration', function() {
   Pebble.openURL(clay.generateUrl());
 });
 
+// The localStorage keys whose values are baked into the weather message
+// phone-side (unit conversion, time formatting, flags that ride along and
+// get cache-persisted on the watch only via a fetch). Only a change to one
+// of these needs a refetch after a Clay save; theme/card/nav-only saves
+// used to fire a full 3-call fetch for nothing.
+function weatherRelevantSnapshot() {
+  return [
+    localStorage.getItem('units'),
+    localStorage.getItem('useDewPoint'),
+    localStorage.getItem('showLocation'),
+    localStorage.getItem('timeFormat'),
+    localStorage.getItem('locationOverride')
+  ].join('|');
+}
+
 Pebble.addEventListener('webviewclosed', function(e) {
   if (!e || !e.response) return;
+  var beforeSave = weatherRelevantSnapshot();
   var dict = clay.getSettings(e.response, false);
   if (dict.Units !== undefined) {
     // Clay radiogroup values come back as strings ("0"/"1"), so coerce
@@ -994,10 +1066,17 @@ Pebble.addEventListener('webviewclosed', function(e) {
   } catch (err) {
     console.log('watch card state cache update skipped: ' + err.message);
   }
+  // Refetch only when a weather-relevant setting actually changed. Not gated
+  // by lastFetchAt — a units change needs freshly converted data regardless
+  // of age. Kept in both send callbacks, as before.
+  var needsFetch = (weatherRelevantSnapshot() !== beforeSave);
+  function afterSave() {
+    if (needsFetch) {
+      locateAndFetch();
+    } else {
+      console.log('config saved, no weather-relevant change, skipping fetch');
+    }
+  }
   var msg = clay.getSettings(e.response);
-  Pebble.sendAppMessage(msg, function() {
-    locateAndFetch();
-  }, function() {
-    locateAndFetch();
-  });
+  Pebble.sendAppMessage(msg, afterSave, afterSave);
 });
