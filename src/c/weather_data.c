@@ -117,10 +117,11 @@ const char *uv_label(int uv) {
 }
 
 const char *aqi_label(int aqi) {
+  // EPA AQI bands — must match the gauge color helper in cards/air_quality.c.
   if (aqi <= 50) return "GOOD";
   if (aqi <= 100) return "MODERATE";
-  if (aqi <= 150) return "UNHEALTHY";
-  if (aqi <= 200) return "V.UNHEALTHY";
-  if (aqi <= 300) return "HAZARDOUS";
-  return "EXTREME";
+  if (aqi <= 150) return "SENSITIVE";
+  if (aqi <= 200) return "UNHEALTHY";
+  if (aqi <= 300) return "V.UNHEALTHY";
+  return "HAZARDOUS";
 }

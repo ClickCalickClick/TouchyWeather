@@ -167,7 +167,7 @@ function pollenGrainsToUpi(grass, birch, alder, ragweed, mugwort, olive) {
   }
   var vals = [
     grassScale(grass), treeScale(birch),   treeScale(alder),
-    weedScale(ragweed), weedScale(mugwort), grassScale(olive),
+    weedScale(ragweed), weedScale(mugwort), treeScale(olive),
   ];
   var max = -1;
   for (var i = 0; i < vals.length; i++) {
@@ -424,10 +424,19 @@ function fetchWeather(lat, lon) {
         // like "2026-05-06T14:00" when timezone=auto.
         var startIdx = 0;
         if (times.length) {
-          var now = new Date();
-          var pad = function(n) { return n < 10 ? '0' + n : '' + n; };
-          var nowKey = now.getFullYear() + '-' + pad(now.getMonth() + 1) +
-                       '-' + pad(now.getDate()) + 'T' + pad(now.getHours()) + ':00';
+          // Open-Meteo (timezone=auto) returns hourly.time in the LOCATION's
+          // timezone. cur.time is in that same tz, so key off it — using the
+          // phone's local clock would miss the match under a LocationOverride
+          // in a different timezone and silently start the bars at midnight.
+          var nowKey;
+          if (cur.time) {
+            nowKey = cur.time.slice(0, 13) + ':00';  // "2026-05-06T14" + ":00"
+          } else {
+            var now = new Date();
+            var pad = function(n) { return n < 10 ? '0' + n : '' + n; };
+            nowKey = now.getFullYear() + '-' + pad(now.getMonth() + 1) +
+                     '-' + pad(now.getDate()) + 'T' + pad(now.getHours()) + ':00';
+          }
           for (var k = 0; k < times.length; k++) {
             if (times[k] === nowKey) { startIdx = k; break; }
           }
@@ -800,8 +809,11 @@ function sendRadarStatus(status) {
   Pebble.sendAppMessage({ RadarStatus: status });
 }
 
+var RADAR_CHUNK_MAX_TRIES = 3;
 function sendRadarChunk(chunkIdx, total, w, h, ts, byteArr, onAllDone) {
+  var tries = 0;
   function send() {
+    tries++;
     var msg = {
       RadarChunkIdx: chunkIdx,
       RadarChunkTotal: total,
@@ -815,10 +827,17 @@ function sendRadarChunk(chunkIdx, total, w, h, ts, byteArr, onAllDone) {
         if (onAllDone) onAllDone();
       }
     }, function(e) {
-      // Retry once after a brief pause; transient drop is common when
-      // the watch is busy redrawing.
-      console.log('radar chunk ' + chunkIdx + ' failed, retrying');
-      setTimeout(send, 1500);
+      // Retry after a brief pause; transient drop is common when the watch is
+      // busy redrawing. Cap the attempts so a persistently flaky link can't
+      // loop forever draining battery — after the last try, report the error
+      // status so the watch UI resolves out of its loading state.
+      if (tries < RADAR_CHUNK_MAX_TRIES) {
+        console.log('radar chunk ' + chunkIdx + ' failed, retry ' + tries);
+        setTimeout(send, 1500);
+      } else {
+        console.log('radar chunk ' + chunkIdx + ' failed after ' + tries + ' tries, giving up');
+        sendRadarStatus(3);
+      }
     });
   }
   send();

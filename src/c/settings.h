@@ -61,7 +61,7 @@ bool settings_get_loop_nav(void);
 void settings_set_loop_nav(bool loop);
 
 // Background update interval in seconds. 0 = disabled, 1800 = 30 mins, 3600 = 1 hour.
-// Default is 3600 (1 hour). Persisted across launches.
+// Default is 0 (disabled, opt-in). Persisted across launches.
 int settings_get_background_interval(void);
 void settings_set_background_interval(int interval_secs);
 

@@ -418,6 +418,13 @@ int main(void) {
     // Load settings to check interval
     settings_load();
 
+    // Load the real cached weather before any background payload arrives.
+    // Otherwise prv_save_cache() would persist the mock struct back over the
+    // real cache for every field the background fetch doesn't carry (pollen,
+    // sunrise, high/low, etc.). Safe headless: comm_load_cache() only fires
+    // the redraw callback when one is registered (none is here).
+    comm_load_cache();
+
     // Init background fetch (minimal init, no UI)
     comm_background_init();
 

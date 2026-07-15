@@ -32,8 +32,8 @@ typedef struct {
   int uv;              // 0..11+ — current UV (live)
   int uv_max;          // 0..11+ — today's forecast peak (for "PEAK n" subtitle)
   int aqi;             // US AQI 0..500
-  char sunrise[8];     // "6:14 AM"
-  char sunset[8];      // "7:45 PM"
+  char sunrise[10];    // "6:14 AM" / "10:30 PM" (two-digit hour needs 9+NUL)
+  char sunset[10];     // "7:45 PM" / "10:30 PM"
   char location_name[32]; // human-readable city, e.g. "San Francisco"
   int rain_alert_min;  // minutes until rain, -1 if none
   Units units;

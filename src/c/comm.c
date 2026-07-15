@@ -57,7 +57,9 @@ static void prv_bg_exit(void *data);
 // Bumped 107 -> 108 when Phase 4's UV/AQI detail modals added hours_uv[6]
 // + pm2_5/pm10/o3/no2 (shifts nothing before pollen_level, but the struct
 // grew — an old 107 blob would leave the new fields as garbage).
-#define PERSIST_KEY_CACHE 108
+// Bumped 108 -> 109 when sunrise/sunset were widened from [8] to [10] to fit
+// two-digit-hour times like "10:30 PM" (shifts every field after sunset).
+#define PERSIST_KEY_CACHE 109
 
 static void prv_save_cache(void) {
   WeatherData *d = weather_data_get();
@@ -292,7 +294,12 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
     d->location_name[sizeof(d->location_name) - 1] = '\0';
   }
   if ((t = dict_find(iter, MESSAGE_KEY_RainAlertMinutes))) { d->rain_alert_min = t->value->int32; }
-  if ((t = dict_find(iter, MESSAGE_KEY_Units))) { d->units = (Units)t->value->int32; }
+  if ((t = dict_find(iter, MESSAGE_KEY_Units))) {
+    // Clay radiogroup with string values "0"/"1" delivers as TUPLE_CSTRING;
+    // older builds / direct AppMessage tests deliver TUPLE_INT. Accept both.
+    d->units = (Units)((t->type == TUPLE_CSTRING) ? atoi(t->value->cstring)
+                                                  : (int)t->value->int32);
+  }
   if ((t = dict_find(iter, MESSAGE_KEY_LastUpdated))) {
     // PKJS sends the unix-second timestamp of the fetch. Sentinel "1" from
     // our refresh-trigger doesn't carry useful time info; treat any value
@@ -706,7 +713,10 @@ static void prv_reschedule_wakeup(bool success) {
     s_bg_fail_count = 0;
     delay_secs = interval;  // Normal interval (30 or 60 mins)
   } else {
-    s_bg_fail_count++;
+    // Clamp before shifting: the backoff already saturates at s_max_backoff_mins
+    // by fail_count 7 (5 * 2^6 = 320 > 240), so an uncapped counter would only
+    // overflow the 1<<(n-1) shift into negative/UB delays after ~30 failures.
+    if (s_bg_fail_count < 7) s_bg_fail_count++;
     // Exponential: 5, 10, 20, 40, 80, 160 mins (cap at 4 hrs)
     int backoff_mins = 5 * (1 << (s_bg_fail_count - 1));
     if (backoff_mins > s_max_backoff_mins) {

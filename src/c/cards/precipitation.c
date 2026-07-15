@@ -136,7 +136,9 @@ void card_precipitation_draw(GContext *ctx, GRect bounds) {
       graphics_fill_rect(ctx, GRect(bx, chart_bot - 2, bar_w, 2),
                          1, GCornersTop);
     } else {
-      int bh = chart_h * pct / 100;
+      // Reserve 18px of headroom above a full-height bar for the % label so
+      // a 100% bar's label clears the header box (matches the Big Mode path).
+      int bh = (chart_h - 18) * pct / 100;
       if (bh < 3) bh = 3; // legibility floor only for nonzero values
       graphics_context_set_fill_color(ctx, theme_accent_blue());
       graphics_fill_rect(ctx, GRect(bx, chart_bot - bh, bar_w, bh),
