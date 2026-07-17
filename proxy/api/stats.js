@@ -83,8 +83,9 @@ module.exports = async (req, res) => {
   const mau = await scard(kv, `users:month:${monthKey(now)}`);
   const yau = await scard(kv, `users:year:${now.getUTCFullYear()}`);
 
-  // App vs face split (per-variant sets written by track.js). Older app builds
-  // that sent no variant are counted under 'app' server-side.
+  // App vs face vs mac split (per-variant sets written by track.js). Older app
+  // builds that sent no variant are counted under 'app' server-side; the Mac app
+  // sends variant:'mac'.
   async function byVariant(variant) {
     return {
       dau: await scard(kv, `users:day:${variant}:${dayKey(now)}`),
@@ -93,7 +94,11 @@ module.exports = async (req, res) => {
       yau: await scard(kv, `users:year:${variant}:${now.getUTCFullYear()}`),
     };
   }
-  const variants = { app: await byVariant('app'), face: await byVariant('face') };
+  const variants = {
+    app: await byVariant('app'),
+    face: await byVariant('face'),
+    mac: await byVariant('mac'),
+  };
 
   // Trailing 14-day DAU trend.
   const dailyTrend = [];
@@ -184,15 +189,19 @@ function bars(trend) {
 }
 
 function variantTable(v) {
-  const app = v.app, face = v.face;
+  // Three platforms now: App (Pebble watch app), Face (watch face), Mac
+  // (TouchyWeather for Mac). Columns are counts + the cross-platform total;
+  // note the total can be less than the column sum since one anonymized user
+  // may appear on more than one platform (each variant set is deduped, but a
+  // user active on both app and mac counts once in the combined 'users:*' set).
+  const app = v.app, face = v.face, mac = v.mac || { dau: 0, wau: 0, mau: 0, yau: 0 };
   function row(label, key) {
-    const a = app[key], f = face[key], tot = a + f;
-    const pct = tot > 0 ? Math.round((face[key] / tot) * 100) : 0;
+    const a = app[key], f = face[key], m = mac[key], tot = a + f + m;
     return '<tr><td>' + label + '</td><td>' + a + '</td><td>' + f +
-      '</td><td>' + tot + '</td><td>' + pct + '%</td></tr>';
+      '</td><td>' + m + '</td><td>' + tot + '</td></tr>';
   }
   return '<table class="vt"><thead><tr>' +
-    '<th></th><th>App</th><th>Face</th><th>Total</th><th>Face&nbsp;%</th>' +
+    '<th></th><th>App</th><th>Face</th><th>Mac</th><th>Sum</th>' +
     '</tr></thead><tbody>' +
     row('Daily', 'dau') + row('Weekly', 'wau') +
     row('Monthly', 'mau') + row('Yearly', 'yau') +
@@ -239,7 +248,7 @@ function renderHtml(d) {
 '<div class="card"><div class="n">' + h.mau + '</div><div class="l">Monthly</div></div>' +
 '<div class="card"><div class="n">' + h.yau + '</div><div class="l">Yearly</div></div>' +
 '</div>' +
-'<h2>App vs Face — active users</h2>' + variantTable(d.variants) +
+'<h2>App vs Face vs Mac — active users</h2>' + variantTable(d.variants) +
 '<h2>Daily active users — last 14 days</h2><div class="chart">' + bars(d.dailyTrend) + '</div>' +
 '<h2>Weekly active users — last 8 weeks</h2><div class="chart">' + bars(d.weeklyTrend) + '</div>' +
 '<h2>Monthly active users — last 6 months</h2><div class="chart">' + bars(d.monthlyTrend) + '</div>' +

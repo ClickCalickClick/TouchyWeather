@@ -107,9 +107,11 @@ module.exports = async (req, res) => {
   body = body || {};
 
   const id = typeof body.id === 'string' ? body.id.trim() : '';
-  // Which client sent this: 'face' or 'app'. Older app builds send no variant,
-  // so anything missing/unknown defaults to 'app' for backward compatibility.
-  const variant = body.variant === 'face' ? 'face' : 'app';
+  // Which client sent this: 'face' (watch face), 'app' (Pebble watch app), or
+  // 'mac' (TouchyWeather for Mac). Older app builds send no variant, so
+  // anything missing/unknown defaults to 'app' for backward compatibility.
+  const KNOWN_VARIANTS = ['app', 'face', 'mac'];
+  const variant = KNOWN_VARIANTS.indexOf(body.variant) >= 0 ? body.variant : 'app';
   if (!id) {
     // Nothing to count without an id; ack so the client doesn't retry forever.
     res.status(204).end();
@@ -131,7 +133,8 @@ module.exports = async (req, res) => {
 
   try {
     await Promise.all([
-      // Combined sets (app + face union) — preserve the existing headline totals.
+      // Combined sets (union across all variants: app + face + mac) — the
+      // cross-platform headline totals.
       kv.sadd(`users:day:${p.day}`, hash),
       kv.sadd(`users:week:${p.week}`, hash),
       kv.sadd(`users:month:${p.month}`, hash),
