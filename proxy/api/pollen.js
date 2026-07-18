@@ -122,8 +122,10 @@ async function fetchFromGoogle(apiKey, lat, lon) {
 }
 
 module.exports = async (req, res) => {
-  const secret = process.env.RADAR_SECRET;
-  if (secret && req.query.key !== secret) {
+  // Accept the watch key (RADAR_SECRET) or the Mac key (RADAR_SECRET_MAC);
+  // neither set ⇒ auth off (local dev / forks). See api-contract.md §5/§8.
+  const allowedKeys = [process.env.RADAR_SECRET, process.env.RADAR_SECRET_MAC].filter(Boolean);
+  if (allowedKeys.length && !allowedKeys.includes(req.query.key)) {
     res.status(401).send('unauthorized');
     return;
   }

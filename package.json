@@ -1,7 +1,7 @@
 {
   "name": "TouchyWeather",
   "author": "MakeAwesomeHappen",
-  "version": "1.11.1",
+  "version": "1.11.2",
   "keywords": [
     "pebble-app"
   ],
@@ -18,7 +18,11 @@
       "configurable"
     ],
     "targetPlatforms": [
+      "basalt",
+      "chalk",
+      "diorite",
       "emery",
+      "flint",
       "gabbro"
     ],
     "menuIcon": "IMAGE_MENU_ICON",
@@ -48,6 +52,10 @@
       "UV",
       "UVMax",
       "AQI",
+      "PM25",
+      "PM10",
+      "O3",
+      "NO2",
       "Sunrise",
       "Sunset",
       "RainAlertMinutes",
@@ -94,6 +102,12 @@
       "Hour6Wind",
       "Hour6WindDir",
       "Hour6Precip",
+      "Hour1Uv",
+      "Hour2Uv",
+      "Hour3Uv",
+      "Hour4Uv",
+      "Hour5Uv",
+      "Hour6Uv",
       "Day0Label",
       "Day0High",
       "Day0Low",
@@ -142,7 +156,24 @@
       "DewPoint",
       "PollenLevel",
       "LoopNavigation",
-      "BackgroundUpdateInterval"
+      "BackgroundUpdateInterval",
+      "AnimationsEnabled",
+      "SelectTogglesTheme",
+      "BigMode",
+      "PhoneManagesCards",
+      "CardEnabledHours",
+      "CardEnabledWeek",
+      "CardEnabledPrecip",
+      "CardEnabledUV",
+      "CardEnabledAQ",
+      "CardEnabledSun",
+      "CardEnabledNight",
+      "CardEnabledGolden",
+      "CardEnabledRadar",
+      "CardEnabledAdvice",
+      "AutoHidePrecip",
+      "CardOrder",
+      "HideSettingsCard"
     ],
     "resources": {
     "media": [

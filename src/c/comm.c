@@ -3,11 +3,21 @@
 #include "theme.h"
 #include "settings.h"
 #include "refresh_sheet.h"
+#include "anim.h"
+#include "glance.h"
 #include "cards/cards.h"
 #include <string.h>
 #include <stdlib.h>
 
 static CommUpdateCb s_update_cb = NULL;
+static CommVisibilityCb s_visibility_cb = NULL;
+
+// Phase 3.2 auto-hide tuning (see DECISIONS.md 3.2 to change these).
+#define AUTO_HIDE_STALE_SECS   (3 * 60 * 60)  // fail open if data older than 3h
+#define AUTO_HIDE_POP_THRESHOLD 40            // % chance in the next 6h → "rain"
+#define AUTO_HIDE_DRY_UPDATES   2             // consecutive dry evals before hide
+static int s_dry_updates = 0;                 // hysteresis counter
+static void prv_evaluate_auto_hide(void);
 
 // Background update state
 static int s_bg_fail_count = 0;
@@ -44,7 +54,12 @@ static void prv_bg_exit(void *data);
 // Bumped 105 -> 106 when location_name[32] was added to WeatherData
 // (shifts every field after sunset[8]; an old blob would misalign).
 // Bumped 106 -> 107 when show_location bool was added to WeatherData.
-#define PERSIST_KEY_CACHE 107
+// Bumped 107 -> 108 when Phase 4's UV/AQI detail modals added hours_uv[6]
+// + pm2_5/pm10/o3/no2 (shifts nothing before pollen_level, but the struct
+// grew — an old 107 blob would leave the new fields as garbage).
+// Bumped 108 -> 109 when sunrise/sunset were widened from [8] to [10] to fit
+// two-digit-hour times like "10:30 PM" (shifts every field after sunset).
+#define PERSIST_KEY_CACHE 109
 
 static void prv_save_cache(void) {
   WeatherData *d = weather_data_get();
@@ -127,6 +142,101 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
   if ((t = dict_find(iter, MESSAGE_KEY_LoopNavigation))) {
     settings_set_loop_nav(t->value->int32 != 0);
   }
+  if ((t = dict_find(iter, MESSAGE_KEY_AnimationsEnabled))) {
+    // Clay toggle → int 0/1; accept a CSTRING form too, for robustness.
+    bool on = (t->type == TUPLE_CSTRING) ? (atoi(t->value->cstring) != 0)
+                                         : (t->value->int32 != 0);
+    settings_set_animations_enabled(on);
+    // Resume decorative animation immediately when turned on; when turned
+    // off, anim_kick() is harmless (the next tick re-settles and stops).
+    anim_kick();
+    if (s_update_cb) s_update_cb();
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_SelectTogglesTheme))) {
+    bool on = (t->type == TUPLE_CSTRING) ? (atoi(t->value->cstring) != 0)
+                                         : (t->value->int32 != 0);
+    settings_set_select_toggles_theme(on);
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_BigMode))) {
+    // Big Mode (Stage B): larger fonts + high contrast. Repaint immediately so
+    // the current card switches look the moment the toggle changes.
+    bool on = (t->type == TUPLE_CSTRING) ? (atoi(t->value->cstring) != 0)
+                                         : (t->value->int32 != 0);
+    settings_set_big_mode(on);
+    if (s_update_cb) s_update_cb();
+  }
+  // Phase 2.2 + Settings-in-Clay: per-card visibility, card order and the
+  // hide-Settings-card opt-in from Clay. Visibility/order only apply when the
+  // user has opted into phone control (PhoneManagesCards); otherwise on-watch
+  // card management is left untouched.
+  bool cards_changed = false;
+  if ((t = dict_find(iter, MESSAGE_KEY_PhoneManagesCards))) {
+    bool on = (t->type == TUPLE_CSTRING) ? (atoi(t->value->cstring) != 0)
+                                         : (t->value->int32 != 0);
+    // A gate flip changes the EFFECTIVE hide-Settings state (it's an AND of
+    // the two toggles), so nav must re-apply — e.g. turning phone management
+    // off must immediately bring the Settings card back.
+    if (on != settings_get_phone_manages_cards()) cards_changed = true;
+    settings_set_phone_manages_cards(on);
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_HideSettingsCard))) {
+    bool on = (t->type == TUPLE_CSTRING) ? (atoi(t->value->cstring) != 0)
+                                         : (t->value->int32 != 0);
+    // Stored unconditionally; only effective while PhoneManagesCards is on
+    // (settings_get_settings_card_hidden ANDs the two — the fail-safe).
+    if (on != settings_get_hide_settings_card()) cards_changed = true;
+    settings_set_hide_settings_card(on);
+  }
+  if (settings_get_phone_manages_cards()) {
+    // Message key → ToggleId. Keys carry 1 = show, 0 = hide per card.
+    // Not static: MESSAGE_KEY_* are runtime symbols, not constant expressions.
+    const struct { uint32_t key; ToggleId tid; } vis_map[] = {
+      { MESSAGE_KEY_CardEnabledHours,  TOGGLE_HOURS  },
+      { MESSAGE_KEY_CardEnabledWeek,   TOGGLE_WEEK   },
+      { MESSAGE_KEY_CardEnabledPrecip, TOGGLE_PRECIP },
+      { MESSAGE_KEY_CardEnabledUV,     TOGGLE_UV     },
+      { MESSAGE_KEY_CardEnabledAQ,     TOGGLE_AQ     },
+      { MESSAGE_KEY_CardEnabledSun,    TOGGLE_SUN    },
+      { MESSAGE_KEY_CardEnabledNight,  TOGGLE_NIGHT  },
+      { MESSAGE_KEY_CardEnabledGolden, TOGGLE_GOLDEN },
+      { MESSAGE_KEY_CardEnabledRadar,  TOGGLE_RADAR  },
+      { MESSAGE_KEY_CardEnabledAdvice, TOGGLE_ADVICE },
+    };
+    for (unsigned i = 0; i < sizeof(vis_map) / sizeof(vis_map[0]); ++i) {
+      Tuple *vt = dict_find(iter, vis_map[i].key);
+      if (!vt) continue;
+      bool en = (vt->type == TUPLE_CSTRING) ? (atoi(vt->value->cstring) != 0)
+                                            : (vt->value->int32 != 0);
+      settings_set_enabled(vis_map[i].tid, en);
+      cards_changed = true;
+    }
+    // Card ORDER from Clay (the drag-reorder control) — a CSV of ToggleIds.
+    // Strictly validated in settings_apply_order_csv; a bad string is ignored.
+    Tuple *ot = dict_find(iter, MESSAGE_KEY_CardOrder);
+    if (ot && ot->type == TUPLE_CSTRING &&
+        settings_apply_order_csv(ot->value->cstring)) {
+      cards_changed = true;
+    }
+  }
+  // Re-apply the (now-updated) enable flags, visual order and Settings-card
+  // visibility to nav so the rotation and page dots reflect Clay immediately.
+  if (cards_changed) {
+    if (s_visibility_cb) s_visibility_cb();
+    // Converge the phone's seed cache to the just-applied state. Without this
+    // a Clay save left the cache holding PRE-save state, and reopening the
+    // config page injected it over the saved values (visually reverting them;
+    // a second save then really reverted them on the watch too). Debounced;
+    // no echo loop — seeds go watch→phone and are only cached there, never
+    // sent back to the watch.
+    comm_send_card_state();
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_AutoHidePrecip))) {
+    bool on = (t->type == TUPLE_CSTRING) ? (atoi(t->value->cstring) != 0)
+                                         : (t->value->int32 != 0);
+    settings_set_auto_hide_precip(on);
+    // Re-evaluate immediately so turning it on/off takes effect at once.
+    prv_evaluate_auto_hide();
+  }
   if ((t = dict_find(iter, MESSAGE_KEY_BackgroundUpdateInterval))) {
     int old_interval = settings_get_background_interval();
     // Clay's `select` control delivers its string option values
@@ -167,6 +277,10 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
   if ((t = dict_find(iter, MESSAGE_KEY_UV))) { d->uv = t->value->int32; }
   if ((t = dict_find(iter, MESSAGE_KEY_UVMax))) { d->uv_max = t->value->int32; }
   if ((t = dict_find(iter, MESSAGE_KEY_AQI))) { d->aqi = t->value->int32; }
+  if ((t = dict_find(iter, MESSAGE_KEY_PM25))) { d->pm2_5 = t->value->int32; }
+  if ((t = dict_find(iter, MESSAGE_KEY_PM10))) { d->pm10 = t->value->int32; }
+  if ((t = dict_find(iter, MESSAGE_KEY_O3)))   { d->o3 = t->value->int32; }
+  if ((t = dict_find(iter, MESSAGE_KEY_NO2)))  { d->no2 = t->value->int32; }
   if ((t = dict_find(iter, MESSAGE_KEY_Sunrise))) {
     strncpy(d->sunrise, t->value->cstring, sizeof(d->sunrise) - 1);
     d->sunrise[sizeof(d->sunrise) - 1] = '\0';
@@ -180,7 +294,12 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
     d->location_name[sizeof(d->location_name) - 1] = '\0';
   }
   if ((t = dict_find(iter, MESSAGE_KEY_RainAlertMinutes))) { d->rain_alert_min = t->value->int32; }
-  if ((t = dict_find(iter, MESSAGE_KEY_Units))) { d->units = (Units)t->value->int32; }
+  if ((t = dict_find(iter, MESSAGE_KEY_Units))) {
+    // Clay radiogroup with string values "0"/"1" delivers as TUPLE_CSTRING;
+    // older builds / direct AppMessage tests deliver TUPLE_INT. Accept both.
+    d->units = (Units)((t->type == TUPLE_CSTRING) ? atoi(t->value->cstring)
+                                                  : (int)t->value->int32);
+  }
   if ((t = dict_find(iter, MESSAGE_KEY_LastUpdated))) {
     // PKJS sends the unix-second timestamp of the fetch. Sentinel "1" from
     // our refresh-trigger doesn't carry useful time info; treat any value
@@ -230,6 +349,11 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
     MESSAGE_KEY_Hour3Precip, MESSAGE_KEY_Hour4Precip,
     MESSAGE_KEY_Hour5Precip, MESSAGE_KEY_Hour6Precip
   };
+  uint32_t hour_uv_keys[6] = {
+    MESSAGE_KEY_Hour1Uv, MESSAGE_KEY_Hour2Uv,
+    MESSAGE_KEY_Hour3Uv, MESSAGE_KEY_Hour4Uv,
+    MESSAGE_KEY_Hour5Uv, MESSAGE_KEY_Hour6Uv
+  };
   for (int i = 0; i < 6; i++) {
     if ((t = dict_find(iter, hour_label_keys[i]))) {
       strncpy(d->hours_label[i], t->value->cstring,
@@ -255,6 +379,9 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
     }
     if ((t = dict_find(iter, hour_precip_keys[i]))) {
       d->hours_precip_x10[i] = t->value->int32;
+    }
+    if ((t = dict_find(iter, hour_uv_keys[i]))) {
+      d->hours_uv[i] = (uint8_t)t->value->int32;
     }
   }
 
@@ -329,6 +456,8 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
   if (got_anything) {
     d->valid = true;
     prv_save_cache();
+    prv_evaluate_auto_hide();  // Phase 3.2: re-hide/show precip+radar per forecast
+    anim_kick();  // fresh data: wake the hero icon for another window
     if (s_update_cb) s_update_cb();
     // Notify the pull-to-refresh sheet so it can close. Safe in any
     // state — it's a no-op unless the sheet is currently loading.
@@ -380,6 +509,27 @@ void comm_request_refresh(void) {
   app_message_outbox_send();
 }
 
+// One-shot retry when a refresh-sentinel send fails (typically PKJS not up
+// yet at the 750ms initial request). Without it, a reinstall that wiped the
+// watch's cache but left the phone's lastFetchAt fresh could end up with no
+// fetch at all: the sentinel dies here and PKJS `ready` skips as "fresh".
+static bool s_refresh_retry_done = false;
+
+static void prv_refresh_retry(void *ctx) {
+  (void)ctx;
+  APP_LOG(APP_LOG_LEVEL_INFO, "Refresh sentinel send failed, retrying once");
+  comm_request_refresh();
+}
+
+static void prv_outbox_failed(DictionaryIterator *iter, AppMessageResult reason,
+                              void *context) {
+  (void)reason; (void)context;
+  if (s_refresh_retry_done) return;
+  if (!iter || !dict_find(iter, MESSAGE_KEY_LastUpdated)) return;
+  s_refresh_retry_done = true;  // per-launch: one retry, never a loop
+  app_timer_register(2000, prv_refresh_retry, NULL);
+}
+
 void comm_request_radar(void) {
   DictionaryIterator *iter;
   if (app_message_outbox_begin(&iter) != APP_MSG_OK) return;
@@ -388,8 +538,128 @@ void comm_request_radar(void) {
   app_message_outbox_send();
 }
 
+// --- Watch→Clay card-state seed ---------------------------------------------
+// PKJS caches this state and injects it into Clay's persisted settings before
+// the config page opens, so Clay always shows the watch's true card config
+// (and a Clay save can no longer silently wipe on-watch changes).
+
+#define CARD_STATE_DEBOUNCE_MS 900
+#define CARD_STATE_RETRY_MS    2000
+#define CARD_STATE_MAX_TRIES   5
+
+static AppTimer *s_card_state_timer = NULL;
+static int s_card_state_tries = 0;
+
+static void prv_send_card_state_now(void *ctx) {
+  (void)ctx;
+  s_card_state_timer = NULL;
+  DictionaryIterator *iter;
+  if (app_message_outbox_begin(&iter) != APP_MSG_OK) {
+    // Outbox busy (a refresh request may still be in flight). Retry a few
+    // times, then give up — the next change or launch re-sends anyway.
+    if (++s_card_state_tries < CARD_STATE_MAX_TRIES) {
+      s_card_state_timer =
+          app_timer_register(CARD_STATE_RETRY_MS, prv_send_card_state_now, NULL);
+    }
+    return;
+  }
+
+  // Visual order as a CSV of ToggleIds ("9,0,1,..."), matching the format the
+  // Clay card-order control round-trips back.
+  char order_csv[SETTINGS_TOGGLEABLE_COUNT * 2 + 1];
+  int pos = 0;
+  for (int i = 0; i < SETTINGS_TOGGLEABLE_COUNT; ++i) {
+    if (i) order_csv[pos++] = ',';
+    order_csv[pos++] = (char)('0' + (int)settings_visual_id(i));
+  }
+  order_csv[pos] = '\0';
+  dict_write_cstring(iter, MESSAGE_KEY_CardOrder, order_csv);
+
+  // Per-card enable flags, keyed exactly like the Clay toggles so PKJS can
+  // inject them 1:1. Not static: MESSAGE_KEY_* are runtime symbols.
+  const struct { uint32_t key; ToggleId tid; } vis_map[] = {
+    { MESSAGE_KEY_CardEnabledHours,  TOGGLE_HOURS  },
+    { MESSAGE_KEY_CardEnabledWeek,   TOGGLE_WEEK   },
+    { MESSAGE_KEY_CardEnabledPrecip, TOGGLE_PRECIP },
+    { MESSAGE_KEY_CardEnabledUV,     TOGGLE_UV     },
+    { MESSAGE_KEY_CardEnabledAQ,     TOGGLE_AQ     },
+    { MESSAGE_KEY_CardEnabledSun,    TOGGLE_SUN    },
+    { MESSAGE_KEY_CardEnabledNight,  TOGGLE_NIGHT  },
+    { MESSAGE_KEY_CardEnabledGolden, TOGGLE_GOLDEN },
+    { MESSAGE_KEY_CardEnabledRadar,  TOGGLE_RADAR  },
+    { MESSAGE_KEY_CardEnabledAdvice, TOGGLE_ADVICE },
+  };
+  for (unsigned i = 0; i < sizeof(vis_map) / sizeof(vis_map[0]); ++i) {
+    dict_write_uint8(iter, vis_map[i].key,
+                     settings_get_enabled(vis_map[i].tid) ? 1 : 0);
+  }
+  dict_write_uint8(iter, MESSAGE_KEY_PhoneManagesCards,
+                   settings_get_phone_manages_cards() ? 1 : 0);
+  // Raw toggle value (not the gated AND) so Clay shows what the user chose.
+  dict_write_uint8(iter, MESSAGE_KEY_HideSettingsCard,
+                   settings_get_hide_settings_card() ? 1 : 0);
+  dict_write_end(iter);
+  app_message_outbox_send();
+}
+
+void comm_send_card_state(void) {
+  s_card_state_tries = 0;
+  if (s_card_state_timer) app_timer_cancel(s_card_state_timer);
+  s_card_state_timer =
+      app_timer_register(CARD_STATE_DEBOUNCE_MS, prv_send_card_state_now, NULL);
+}
+
 void comm_set_update_callback(CommUpdateCb cb) {
   s_update_cb = cb;
+}
+
+void comm_set_visibility_callback(CommVisibilityCb cb) {
+  s_visibility_cb = cb;
+}
+
+// Phase 3.2: is measurable rain expected soon? Cautious (false-negative averse):
+// any of the near-term signals firing means "rain" → keep the cards shown.
+static bool prv_rain_expected(WeatherData *d) {
+  if (d->rain_alert_min >= 0) return true;  // data source flagged imminent rain
+  for (int i = 0; i < 6; ++i) {             // high chance in the next 6 hours
+    if (d->hours_pop[i] >= AUTO_HIDE_POP_THRESHOLD) return true;
+  }
+  return false;
+}
+
+// Decide whether precip+radar should be auto-hidden right now and apply it.
+// Guardrails: fail open on bad/stale data, hysteresis (hide slowly, show fast),
+// and never mutate the user's persisted enable flags (auto-hidden is separate;
+// effective visibility = user_enabled AND NOT auto_hidden).
+static void prv_evaluate_auto_hide(void) {
+  bool want_hidden;
+  if (!settings_get_auto_hide_precip()) {
+    want_hidden = false;      // feature off → never auto-hide
+    s_dry_updates = 0;
+  } else {
+    WeatherData *d = weather_data_get();
+    uint32_t now = (uint32_t)time(NULL);
+    bool stale = (d->last_updated == 0) ||
+                 (now - d->last_updated > AUTO_HIDE_STALE_SECS);
+    if (!d->valid || stale) {
+      want_hidden = false;    // fail open: never hide on missing/old data
+      s_dry_updates = 0;
+    } else if (prv_rain_expected(d)) {
+      want_hidden = false;    // rain → show immediately, reset hysteresis
+      s_dry_updates = 0;
+    } else {
+      s_dry_updates++;        // dry → hide only after N consecutive dry evals
+      want_hidden = (s_dry_updates >= AUTO_HIDE_DRY_UPDATES);
+    }
+  }
+  bool changed =
+      (settings_get_auto_hidden(TOGGLE_PRECIP) != want_hidden) ||
+      (settings_get_auto_hidden(TOGGLE_RADAR)  != want_hidden);
+  if (changed) {
+    settings_set_auto_hidden(TOGGLE_PRECIP, want_hidden);
+    settings_set_auto_hidden(TOGGLE_RADAR, want_hidden);
+    if (s_visibility_cb) s_visibility_cb();  // re-apply effective visibility
+  }
 }
 
 static void prv_initial_refresh(void *ctx) {
@@ -422,6 +692,10 @@ static void prv_initial_refresh(void *ctx) {
 
 void comm_load_cache(void) {
   prv_load_cache();
+  // Phase 3.2: evaluate auto-hide against the just-loaded cache so the rotation
+  // reflects the forecast from the first draw (hysteresis means one dry cache
+  // read won't hide yet — it takes effect after a subsequent dry update).
+  prv_evaluate_auto_hide();
   // Trigger redraw if cache was loaded so the screen reconciles immediately.
   // This prevents the imperial mock flash for metric users.
   if (s_update_cb && weather_data_get()->valid) {
@@ -439,7 +713,10 @@ static void prv_reschedule_wakeup(bool success) {
     s_bg_fail_count = 0;
     delay_secs = interval;  // Normal interval (30 or 60 mins)
   } else {
-    s_bg_fail_count++;
+    // Clamp before shifting: the backoff already saturates at s_max_backoff_mins
+    // by fail_count 7 (5 * 2^6 = 320 > 240), so an uncapped counter would only
+    // overflow the 1<<(n-1) shift into negative/UB delays after ~30 failures.
+    if (s_bg_fail_count < 7) s_bg_fail_count++;
     // Exponential: 5, 10, 20, 40, 80, 160 mins (cap at 4 hrs)
     int backoff_mins = 5 * (1 << (s_bg_fail_count - 1));
     if (backoff_mins > s_max_backoff_mins) {
@@ -499,6 +776,11 @@ static void prv_wakeup_handler(WakeupId id, int32_t reason) {
 static void prv_bg_exit(void *data) {
   (void)data;
   APP_LOG(APP_LOG_LEVEL_INFO, "BG: Closing AppMessage and exiting");
+  // Refresh the launcher glance with whatever this background fetch landed.
+  // On timeout/drop nothing arrived (last_updated stays 0 — bg launches
+  // never load the cache), so glance_update()'s guard makes it a no-op and
+  // the previous slice survives untouched.
+  glance_update();
   app_message_deregister_callbacks();
   s_bg_exit_timer = NULL;
   // Pop (and free) the keep-alive window so the window stack empties and
@@ -551,6 +833,7 @@ void comm_background_init(void) {
   // Open AppMessage (triggers PKJS ready event)
   app_message_register_inbox_received(prv_inbox_received);
   app_message_register_inbox_dropped(prv_inbox_dropped);
+  app_message_register_outbox_failed(prv_outbox_failed);
   app_message_open(2048, 256);
 
   // Request weather
@@ -565,6 +848,7 @@ void comm_init(void) {
   // Cache loading now happens separately in prv_init(), before window push.
   app_message_register_inbox_received(prv_inbox_received);
   app_message_register_inbox_dropped(prv_inbox_dropped);
+  app_message_register_outbox_failed(prv_outbox_failed);
   // Inbox bumped 1024 -> 2048 in Phase 12 to fit a 1500-byte radar
   // pixel chunk plus message tuple overhead.
   app_message_open(2048, 256);
@@ -604,6 +888,11 @@ void comm_init(void) {
       APP_LOG(APP_LOG_LEVEL_INFO, "BG: Scheduling initial wakeup (%d secs)", bg_interval);
     }
   }
+
+  // Seed the phone with the watch's card order + visibility on every launch,
+  // so the Clay config page opens on the watch's true state. The debounce
+  // (plus busy retries) keeps it clear of the 750ms initial refresh request.
+  comm_send_card_state();
 }
 
 void comm_deinit(void) {

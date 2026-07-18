@@ -2,14 +2,51 @@
 #include "theme.h"
 
 // Persistence keys. Avoid collisions with comm.c PERSIST_KEY_CACHE=101.
-#define KEY_THEME              200
+// (Key 200 retired: theme is now owned solely by theme.c under persist key 1;
+//  theme_init() migrates any legacy key-200 value. See theme.c.)
 #define KEY_LOOP_NAV           201  // bool: wrap card carousel at edges
 #define KEY_BG_UPDATE_INTERVAL 202  // int: background update interval in seconds
+#define KEY_ANIMATIONS_ENABLED 203  // bool: decorative animation master switch
+#define KEY_SELECT_TOGGLES_THEME 204 // bool: SELECT flips theme on ordinary cards
+#define KEY_PHONE_MANAGES_CARDS 205  // bool: Clay controls per-card visibility
+#define KEY_AUTO_HIDE_PRECIP   206  // bool: auto-hide precip/radar when dry
+#define KEY_BIG_MODE           207  // bool: Big Mode (large fonts + high contrast)
+#define KEY_HIDE_SETTINGS_CARD 208  // bool: drop Settings card from the carousel
 #define KEY_TOGGLE_BASE        210  // KEY_TOGGLE_BASE + ToggleId
 #define KEY_CARD_ORDER         220  // SETTINGS_TOGGLEABLE_COUNT bytes
 
 // Default: loop the carousel (wrap at the first/last card).
 static bool s_loop_nav = true;
+
+// Decorative animation master switch. Default on (preserves current behavior).
+static bool s_animations_enabled = true;
+
+// Whether SELECT toggles theme on ordinary cards. Default on (preserves the
+// reflexive-press behavior users expect today).
+static bool s_select_toggles_theme = true;
+
+// Opt-in: phone (Clay) controls per-card visibility. Default off so on-watch
+// card management is the norm and a Clay save can't silently wipe it.
+static bool s_phone_manages_cards = false;
+
+// Opt-in (Phase 3.2): auto-hide precip/radar when dry. Default off.
+static bool s_auto_hide_precip = false;
+
+// Opt-in: remove the Settings card from the carousel so button scrolling is
+// purely weather cards (all card management then lives in Clay). Default off.
+// Only EFFECTIVE while PhoneManagesCards is also on — see
+// settings_get_settings_card_hidden() for the fail-safe AND.
+static bool s_hide_settings_card = false;
+
+// Big Mode (Phase 3.1 Stage B): accessibility mode — larger fonts, fewer/bigger
+// elements per card, and hardcoded high-contrast colors. Default off, so the
+// standard "Normal" look is unchanged until the user opts in. Runtime-toggleable
+// (read on the draw path by the ui_font_* accessors and theme.c), unlike the
+// compile-time screen-class axis. Persisted.
+static bool s_big_mode = false;
+
+// Runtime auto-hidden flags (not persisted). Only precip/radar are ever set.
+static bool s_auto_hidden[SETTINGS_TOGGLEABLE_COUNT] = {0};
 
 // Background update interval in seconds. Default is 0 (disabled, opt-in).
 // 0 = disabled, 1800 = 30 mins, 3600 = 1 hour (recommended when enabled).
@@ -63,6 +100,63 @@ ToggleId settings_visual_id(int visual_pos) {
   return (ToggleId)s_visual_order[visual_pos];
 }
 
+bool settings_apply_order_csv(const char *csv) {
+  if (!csv) return false;
+  uint8_t buf[SETTINGS_TOGGLEABLE_COUNT];
+  int n = 0;
+  const char *p = csv;
+  while (*p && n < SETTINGS_TOGGLEABLE_COUNT) {
+    if (*p < '0' || *p > '9') return false;
+    int v = 0;
+    while (*p >= '0' && *p <= '9') { v = v * 10 + (*p - '0'); p++; }
+    if (v >= SETTINGS_TOGGLEABLE_COUNT) return false;
+    buf[n++] = (uint8_t)v;
+    if (*p == ',') {
+      p++;
+      if (!*p) return false;  // trailing comma
+    } else if (*p) {
+      return false;           // junk between entries
+    }
+  }
+  if (n != SETTINGS_TOGGLEABLE_COUNT || *p) return false;
+  if (!prv_is_valid_permutation(buf)) return false;
+  bool changed = false;
+  for (int i = 0; i < SETTINGS_TOGGLEABLE_COUNT; ++i) {
+    if (s_visual_order[i] != buf[i]) changed = true;
+    s_visual_order[i] = buf[i];
+  }
+  if (changed) prv_persist_order();
+  return changed;
+}
+
+// --- Visible (radar-filtered) view of the toggleable rows ------------------
+// On radar-capable platforms the visible view IS the full view. On carved-out
+// platforms radar is filtered out wherever it currently sits in the visual
+// order, so the Settings card shows 9 rows and the cursor/reorder never land
+// on the inert radar entry.
+#if defined(TW_RADAR_SUPPORTED)
+int settings_visible_count(void) { return SETTINGS_TOGGLEABLE_COUNT; }
+ToggleId settings_visible_id(int visible_pos) { return settings_visual_id(visible_pos); }
+#else
+int settings_visible_count(void) { return SETTINGS_TOGGLEABLE_COUNT - 1; }
+
+// s_visual_order index of the visible_pos-th non-radar row (-1 if none).
+static int prv_visual_index_of_visible(int visible_pos) {
+  int seen = 0;
+  for (int i = 0; i < SETTINGS_TOGGLEABLE_COUNT; ++i) {
+    if (s_visual_order[i] == TOGGLE_RADAR) continue;
+    if (seen == visible_pos) return i;
+    seen++;
+  }
+  return -1;
+}
+
+ToggleId settings_visible_id(int visible_pos) {
+  int idx = prv_visual_index_of_visible(visible_pos);
+  return idx < 0 ? TOGGLE_HOURS : (ToggleId)s_visual_order[idx];
+}
+#endif
+
 static bool s_enabled[SETTINGS_TOGGLEABLE_COUNT] = {
   true, true, true, true, true, true, true, true, true, true
 };
@@ -85,10 +179,8 @@ void settings_load(void) {
       }
     }
   }
-  if (persist_exists(KEY_THEME)) {
-    int t = persist_read_int(KEY_THEME);
-    theme_set(t ? THEME_DARK : THEME_LIGHT);
-  }
+  // Theme is loaded by theme_init() (persist key 1), which runs before
+  // settings_load(); no theme handling here anymore.
   for (int i = 0; i < SETTINGS_TOGGLEABLE_COUNT; ++i) {
     if (persist_exists(KEY_TOGGLE_BASE + i)) {
       s_enabled[i] = persist_read_bool(KEY_TOGGLE_BASE + i);
@@ -96,6 +188,24 @@ void settings_load(void) {
   }
   if (persist_exists(KEY_LOOP_NAV)) {
     s_loop_nav = persist_read_bool(KEY_LOOP_NAV);
+  }
+  if (persist_exists(KEY_ANIMATIONS_ENABLED)) {
+    s_animations_enabled = persist_read_bool(KEY_ANIMATIONS_ENABLED);
+  }
+  if (persist_exists(KEY_SELECT_TOGGLES_THEME)) {
+    s_select_toggles_theme = persist_read_bool(KEY_SELECT_TOGGLES_THEME);
+  }
+  if (persist_exists(KEY_PHONE_MANAGES_CARDS)) {
+    s_phone_manages_cards = persist_read_bool(KEY_PHONE_MANAGES_CARDS);
+  }
+  if (persist_exists(KEY_AUTO_HIDE_PRECIP)) {
+    s_auto_hide_precip = persist_read_bool(KEY_AUTO_HIDE_PRECIP);
+  }
+  if (persist_exists(KEY_HIDE_SETTINGS_CARD)) {
+    s_hide_settings_card = persist_read_bool(KEY_HIDE_SETTINGS_CARD);
+  }
+  if (persist_exists(KEY_BIG_MODE)) {
+    s_big_mode = persist_read_bool(KEY_BIG_MODE);
   }
   if (persist_exists(KEY_BG_UPDATE_INTERVAL)) {
     int iv = persist_read_int(KEY_BG_UPDATE_INTERVAL);
@@ -111,10 +221,6 @@ void settings_load(void) {
       persist_write_int(KEY_BG_UPDATE_INTERVAL, 0);
     }
   }
-}
-
-void settings_save_theme(int theme_mode) {
-  persist_write_int(KEY_THEME, theme_mode);
 }
 
 bool settings_get_loop_nav(void) {
@@ -133,6 +239,89 @@ int settings_get_background_interval(void) {
 void settings_set_background_interval(int interval_secs) {
   s_bg_update_interval = interval_secs;
   persist_write_int(KEY_BG_UPDATE_INTERVAL, interval_secs);
+}
+
+bool settings_get_animations_enabled(void) {
+  return s_animations_enabled;
+}
+
+void settings_set_animations_enabled(bool enabled) {
+  s_animations_enabled = enabled;
+  persist_write_bool(KEY_ANIMATIONS_ENABLED, enabled);
+}
+
+bool settings_get_select_toggles_theme(void) {
+  return s_select_toggles_theme;
+}
+
+void settings_set_select_toggles_theme(bool enabled) {
+  s_select_toggles_theme = enabled;
+  persist_write_bool(KEY_SELECT_TOGGLES_THEME, enabled);
+}
+
+bool settings_get_big_mode(void) {
+  return s_big_mode;
+}
+
+void settings_set_big_mode(bool enabled) {
+  s_big_mode = enabled;
+  persist_write_bool(KEY_BIG_MODE, enabled);
+}
+
+bool settings_get_phone_manages_cards(void) {
+  return s_phone_manages_cards;
+}
+
+void settings_set_phone_manages_cards(bool enabled) {
+  s_phone_manages_cards = enabled;
+  persist_write_bool(KEY_PHONE_MANAGES_CARDS, enabled);
+}
+
+bool settings_get_hide_settings_card(void) {
+  return s_hide_settings_card;
+}
+
+void settings_set_hide_settings_card(bool hidden) {
+  s_hide_settings_card = hidden;
+  persist_write_bool(KEY_HIDE_SETTINGS_CARD, hidden);
+}
+
+bool settings_get_settings_card_hidden(void) {
+  // FAIL-SAFE: the Settings card can only ever be dropped from the carousel
+  // while phone management is active, so there is always at least one place
+  // (watch or Clay) that can manage cards. If PhoneManagesCards is turned off
+  // — even with HideSettingsCard still persisted on — the Settings card
+  // returns on the next visibility apply.
+  return s_hide_settings_card && s_phone_manages_cards;
+}
+
+bool settings_get_auto_hide_precip(void) {
+  return s_auto_hide_precip;
+}
+
+void settings_set_auto_hide_precip(bool enabled) {
+  s_auto_hide_precip = enabled;
+  persist_write_bool(KEY_AUTO_HIDE_PRECIP, enabled);
+}
+
+bool settings_get_auto_hidden(ToggleId id) {
+  if (id >= SETTINGS_TOGGLEABLE_COUNT) return false;
+  return s_auto_hidden[id];
+}
+
+void settings_set_auto_hidden(ToggleId id, bool hidden) {
+  if (id >= SETTINGS_TOGGLEABLE_COUNT) return;
+  s_auto_hidden[id] = hidden;
+}
+
+bool settings_get_effective_enabled(ToggleId id) {
+  if (id >= SETTINGS_TOGGLEABLE_COUNT) return true;
+#if !defined(TW_RADAR_SUPPORTED)
+  // Radar is carved out on non-128KB / B&W platforms (see settings.h): force
+  // it effectively-off so nav skips it and its 25.6KB buffer never allocates.
+  if (id == TOGGLE_RADAR) return false;
+#endif
+  return s_enabled[id] && !s_auto_hidden[id];
 }
 
 bool settings_get_enabled(ToggleId id) {
@@ -154,9 +343,14 @@ const char *settings_label(ToggleId id) {
 int settings_cursor(void) { return s_cursor; }
 
 void settings_cursor_advance(void) {
+#if defined(TW_RADAR_SUPPORTED)
   s_cursor = (s_cursor + 1) % SETTINGS_TOGGLEABLE_COUNT;
+#else
+  s_cursor = (s_cursor + 1) % (SETTINGS_TOGGLEABLE_COUNT - 1);
+#endif
 }
 
+#if defined(TW_RADAR_SUPPORTED)
 bool settings_move_up(int visual_pos) {
   if (visual_pos <= 0 || visual_pos >= SETTINGS_TOGGLEABLE_COUNT) return false;
   uint8_t tmp = s_visual_order[visual_pos - 1];
@@ -176,3 +370,40 @@ bool settings_move_down(int visual_pos) {
   prv_persist_order();
   return true;
 }
+#else
+// Reorder in the radar-free visible space: swap the moved visible card with
+// its nearest visible neighbor in s_visual_order, stepping over the hidden
+// radar entry if it sits between them. Radar keeps its slot, so its relative
+// position among the hidden set is preserved while the two visible cards swap.
+bool settings_move_up(int visible_pos) {
+  int idx = prv_visual_index_of_visible(visible_pos);
+  if (idx < 0) return false;
+  int prev = -1;
+  for (int i = idx - 1; i >= 0; --i) {
+    if (s_visual_order[i] != TOGGLE_RADAR) { prev = i; break; }
+  }
+  if (prev < 0) return false;
+  uint8_t tmp = s_visual_order[prev];
+  s_visual_order[prev] = s_visual_order[idx];
+  s_visual_order[idx] = tmp;
+  s_cursor = visible_pos - 1;
+  prv_persist_order();
+  return true;
+}
+
+bool settings_move_down(int visible_pos) {
+  int idx = prv_visual_index_of_visible(visible_pos);
+  if (idx < 0) return false;
+  int next = -1;
+  for (int i = idx + 1; i < SETTINGS_TOGGLEABLE_COUNT; ++i) {
+    if (s_visual_order[i] != TOGGLE_RADAR) { next = i; break; }
+  }
+  if (next < 0) return false;
+  uint8_t tmp = s_visual_order[next];
+  s_visual_order[next] = s_visual_order[idx];
+  s_visual_order[idx] = tmp;
+  s_cursor = visible_pos + 1;
+  prv_persist_order();
+  return true;
+}
+#endif

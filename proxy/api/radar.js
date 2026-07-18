@@ -280,10 +280,11 @@ async function makeRadarLayer(idx, frame, lon, lat, log) {
 }
 
 module.exports = async (req, res) => {
-  // Optional shared-secret auth. Set RADAR_SECRET in the Vercel dashboard;
-  // omit the env var entirely to run without auth (e.g. local dev / forks).
-  const secret = process.env.RADAR_SECRET;
-  if (secret && req.query.key !== secret) {
+  // Optional shared-secret auth. Set RADAR_SECRET (watch) and/or
+  // RADAR_SECRET_MAC (Mac app, revocable independently — api-contract.md §5/§8)
+  // in the Vercel dashboard; omit both to run without auth (local dev / forks).
+  const allowedKeys = [process.env.RADAR_SECRET, process.env.RADAR_SECRET_MAC].filter(Boolean);
+  if (allowedKeys.length && !allowedKeys.includes(req.query.key)) {
     res.status(401).send('unauthorized');
     return;
   }

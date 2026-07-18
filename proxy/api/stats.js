@@ -83,6 +83,23 @@ module.exports = async (req, res) => {
   const mau = await scard(kv, `users:month:${monthKey(now)}`);
   const yau = await scard(kv, `users:year:${now.getUTCFullYear()}`);
 
+  // App vs face vs mac split (per-variant sets written by track.js). Older app
+  // builds that sent no variant are counted under 'app' server-side; the Mac app
+  // sends variant:'mac'.
+  async function byVariant(variant) {
+    return {
+      dau: await scard(kv, `users:day:${variant}:${dayKey(now)}`),
+      wau: await scard(kv, `users:week:${variant}:${isoWeekKey(now)}`),
+      mau: await scard(kv, `users:month:${variant}:${monthKey(now)}`),
+      yau: await scard(kv, `users:year:${variant}:${now.getUTCFullYear()}`),
+    };
+  }
+  const variants = {
+    app: await byVariant('app'),
+    face: await byVariant('face'),
+    mac: await byVariant('mac'),
+  };
+
   // Trailing 14-day DAU trend.
   const dailyTrend = [];
   for (let i = 13; i >= 0; i--) {
@@ -139,6 +156,7 @@ module.exports = async (req, res) => {
   const data = {
     asOf: now.toISOString(),
     headline: { dau, wau, mau, yau },
+    variants,
     retention: { mau, returning, newThisMonth },
     dailyTrend, weeklyTrend, monthlyTrend,
     geoCells,
@@ -170,6 +188,26 @@ function bars(trend) {
   }).join('');
 }
 
+function variantTable(v) {
+  // Three platforms now: App (Pebble watch app), Face (watch face), Mac
+  // (TouchyWeather for Mac). Columns are counts + the cross-platform total;
+  // note the total can be less than the column sum since one anonymized user
+  // may appear on more than one platform (each variant set is deduped, but a
+  // user active on both app and mac counts once in the combined 'users:*' set).
+  const app = v.app, face = v.face, mac = v.mac || { dau: 0, wau: 0, mau: 0, yau: 0 };
+  function row(label, key) {
+    const a = app[key], f = face[key], m = mac[key], tot = a + f + m;
+    return '<tr><td>' + label + '</td><td>' + a + '</td><td>' + f +
+      '</td><td>' + m + '</td><td>' + tot + '</td></tr>';
+  }
+  return '<table class="vt"><thead><tr>' +
+    '<th></th><th>App</th><th>Face</th><th>Mac</th><th>Sum</th>' +
+    '</tr></thead><tbody>' +
+    row('Daily', 'dau') + row('Weekly', 'wau') +
+    row('Monthly', 'mau') + row('Yearly', 'yau') +
+    '</tbody></table>';
+}
+
 function renderHtml(d) {
   const h = d.headline;
   // Geo cells are handed to a Leaflet map rendered client-side. Escape '<'
@@ -194,6 +232,11 @@ function renderHtml(d) {
 '.fill{width:22px;background:linear-gradient(#5b9dff,#3367d6);border-radius:3px 3px 0 0}' +
 '.bl{font-size:9px;color:#8a8f96;margin-top:4px;white-space:nowrap}.bv{font-size:10px;color:#cdd1d6}' +
 '.ret{display:flex;gap:12px}.ret .card{text-align:center}' +
+'.vt{width:100%;border-collapse:collapse;margin-bottom:8px}' +
+'.vt th,.vt td{text-align:right;padding:8px 12px;border-bottom:1px solid #2a2e36}' +
+'.vt th:first-child,.vt td:first-child{text-align:left;color:#9aa0a6}' +
+'.vt th{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#9aa0a6}' +
+'.vt td{font-variant-numeric:tabular-nums}' +
 '#map{width:100%;height:420px;border:1px solid #2a2e36;border-radius:10px;background:#11151c}' +
 '.leaflet-popup-content{color:#111}' +
 '</style></head><body><div class="wrap">' +
@@ -205,6 +248,7 @@ function renderHtml(d) {
 '<div class="card"><div class="n">' + h.mau + '</div><div class="l">Monthly</div></div>' +
 '<div class="card"><div class="n">' + h.yau + '</div><div class="l">Yearly</div></div>' +
 '</div>' +
+'<h2>App vs Face vs Mac — active users</h2>' + variantTable(d.variants) +
 '<h2>Daily active users — last 14 days</h2><div class="chart">' + bars(d.dailyTrend) + '</div>' +
 '<h2>Weekly active users — last 8 weeks</h2><div class="chart">' + bars(d.weeklyTrend) + '</div>' +
 '<h2>Monthly active users — last 6 months</h2><div class="chart">' + bars(d.monthlyTrend) + '</div>' +

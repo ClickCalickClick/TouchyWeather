@@ -32,8 +32,8 @@ typedef struct {
   int uv;              // 0..11+ — current UV (live)
   int uv_max;          // 0..11+ — today's forecast peak (for "PEAK n" subtitle)
   int aqi;             // US AQI 0..500
-  char sunrise[8];     // "6:14 AM"
-  char sunset[8];      // "7:45 PM"
+  char sunrise[10];    // "6:14 AM" / "10:30 PM" (two-digit hour needs 9+NUL)
+  char sunset[10];     // "7:45 PM" / "10:30 PM"
   char location_name[32]; // human-readable city, e.g. "San Francisco"
   int rain_alert_min;  // minutes until rain, -1 if none
   Units units;
@@ -85,6 +85,18 @@ typedef struct {
   // grass/tree/weed indexes. -1 means "unknown / not covered" — the
   // air quality card should skip the pollen badge in that case.
   int pollen_level;
+
+  // Phase 4 detail modals (UV TODAY / AIR DETAIL).
+  //   hours_uv[6] — UV index for +1h..+6h, mirroring the 6 Hours window,
+  //                 for the UV modal's hourly curve.
+  //   pm2_5/pm10/o3/no2 — air-quality pollutant concentrations in µg/m³
+  //                 (the US-AQI inputs) for the AIR DETAIL breakdown.
+  //                 0 = missing/unavailable (Open-Meteo field was null).
+  uint8_t hours_uv[6];
+  int pm2_5;
+  int pm10;
+  int o3;
+  int no2;
 } WeatherData;
 
 void weather_data_init_mock(void);

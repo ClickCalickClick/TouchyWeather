@@ -74,9 +74,27 @@ function periodKeys(d) {
 
 function roundCoord(v) { return Math.round(v * 10) / 10; }
 
+// TTL memoization: a key's expiry only needs setting once, but this function
+// used to re-send EXPIRE on every ping. Warm serverless instances persist
+// module state between invocations, so remember which keys we've already
+// expired and skip the repeat commands (the bulk of per-ping KV cost). A cold
+// start simply re-sets TTLs once — harmless. Keys are date-bucketed so the
+// set stays small; cap it anyway as a leak guard.
+const ttlDone = new Set();
+async function expireOnce(kv, key, ttl) {
+  if (ttlDone.has(key)) return;
+  await kv.expire(key, ttl);
+  if (ttlDone.size > 1000) ttlDone.clear();
+  ttlDone.add(key); // only after success — a thrown expire isn't memoized
+}
+
 module.exports = async (req, res) => {
-  const secret = process.env.RADAR_SECRET;
-  if (secret && req.query.key !== secret) {
+  // Accept either the watch key (RADAR_SECRET) or the Mac key
+  // (RADAR_SECRET_MAC) so the Mac app is revocable independently of the watch
+  // bundle (api-contract.md §5/§8). With neither env var set, auth is off
+  // (local dev / forks), matching the original single-key behavior.
+  const allowedKeys = [process.env.RADAR_SECRET, process.env.RADAR_SECRET_MAC].filter(Boolean);
+  if (allowedKeys.length && !allowedKeys.includes(req.query.key)) {
     res.status(401).send('unauthorized');
     return;
   }
@@ -93,6 +111,11 @@ module.exports = async (req, res) => {
   body = body || {};
 
   const id = typeof body.id === 'string' ? body.id.trim() : '';
+  // Which client sent this: 'face' (watch face), 'app' (Pebble watch app), or
+  // 'mac' (TouchyWeather for Mac). Older app builds send no variant, so
+  // anything missing/unknown defaults to 'app' for backward compatibility.
+  const KNOWN_VARIANTS = ['app', 'face', 'mac'];
+  const variant = KNOWN_VARIANTS.indexOf(body.variant) >= 0 ? body.variant : 'app';
   if (!id) {
     // Nothing to count without an id; ack so the client doesn't retry forever.
     res.status(204).end();
@@ -114,19 +137,32 @@ module.exports = async (req, res) => {
 
   try {
     await Promise.all([
+      // Combined sets (union across all variants: app + face + mac) — the
+      // cross-platform headline totals.
       kv.sadd(`users:day:${p.day}`, hash),
       kv.sadd(`users:week:${p.week}`, hash),
       kv.sadd(`users:month:${p.month}`, hash),
       kv.sadd(`users:year:${p.year}`, hash),
       kv.incr(`hits:day:${p.day}`), // total pings (volume) vs unique users
+      // Per-variant sets so the dashboard can split app vs face.
+      kv.sadd(`users:day:${variant}:${p.day}`, hash),
+      kv.sadd(`users:week:${variant}:${p.week}`, hash),
+      kv.sadd(`users:month:${variant}:${p.month}`, hash),
+      kv.sadd(`users:year:${variant}:${p.year}`, hash),
     ]);
     // Expirations are best-effort; a missed one only delays self-cleanup.
+    // expireOnce skips keys this warm instance already expired, so on most
+    // pings this block costs zero KV commands.
     await Promise.all([
-      kv.expire(`users:day:${p.day}`, TTL_DAY),
-      kv.expire(`users:week:${p.week}`, TTL_WEEK),
-      kv.expire(`users:month:${p.month}`, TTL_MONTH),
-      kv.expire(`users:year:${p.year}`, TTL_YEAR),
-      kv.expire(`hits:day:${p.day}`, TTL_DAY),
+      expireOnce(kv, `users:day:${p.day}`, TTL_DAY),
+      expireOnce(kv, `users:week:${p.week}`, TTL_WEEK),
+      expireOnce(kv, `users:month:${p.month}`, TTL_MONTH),
+      expireOnce(kv, `users:year:${p.year}`, TTL_YEAR),
+      expireOnce(kv, `hits:day:${p.day}`, TTL_DAY),
+      expireOnce(kv, `users:day:${variant}:${p.day}`, TTL_DAY),
+      expireOnce(kv, `users:week:${variant}:${p.week}`, TTL_WEEK),
+      expireOnce(kv, `users:month:${variant}:${p.month}`, TTL_MONTH),
+      expireOnce(kv, `users:year:${variant}:${p.year}`, TTL_YEAR),
     ]);
 
     // Coarse heatmap: count the ~11 km cell for this month. Only aggregate
@@ -137,7 +173,7 @@ module.exports = async (req, res) => {
         lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
       const cell = `${roundCoord(lat).toFixed(1)},${roundCoord(lon).toFixed(1)}`;
       await kv.hincrby(`geo:${p.month}`, cell, 1);
-      await kv.expire(`geo:${p.month}`, TTL_GEO);
+      await expireOnce(kv, `geo:${p.month}`, TTL_GEO);
     }
   } catch (e) {
     // Never surface storage errors to the watch — analytics is best-effort.

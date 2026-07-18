@@ -21,7 +21,17 @@
 // One-line change if you want different copy.
 #define HEADLINE "New on the horizon"
 
+// The sun + headline + version divider header is tuned for the tall large
+// screens. On the short small classes — chalk (180 round) worst of all, where
+// the bottom curve also clips the body's left edge — it ate so much height the
+// changelog wrapped under the fold and the last visible line was clipped
+// mid-word. Shrink the sun and, in prv_load, tighten the vertical rhythm on the
+// small classes so more of the note clears the safe area.
+#if defined(UI_SCREEN_SMALL_ROUND) || defined(UI_SCREEN_SMALL_RECT)
+#define SUN_SIZE 24
+#else
 #define SUN_SIZE 32
+#endif
 #define MARKER_INDENT 14   // text indent past the accent marker
 
 static Window *s_win;
@@ -40,7 +50,14 @@ static int s_sun_cy, s_head_y, s_head_h, s_ver_y;
 static int prv_layout_body(GContext *ctx, int w) {
   GFont f = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
   int x_text = UI_MARGIN_X + MARKER_INDENT;
+  // Reclaim right-side width on the short small screens so the note wraps to
+  // fewer lines (fewer lines = less that scrolls under the round bottom curve).
+  // Large path stays the verbatim expression so emery/gabbro don't shift.
+#if defined(UI_SCREEN_SMALL_ROUND) || defined(UI_SCREEN_SMALL_RECT)
+  int w_text = w - x_text - 8;
+#else
   int w_text = w - x_text - UI_MARGIN_X;
+#endif
   if (w_text < 20) w_text = 20;
 
   // strtok mutates its buffer, so work on a copy of the notes each call.
@@ -144,17 +161,35 @@ static void prv_load(Window *window) {
   GSize hs = graphics_text_layout_get_content_size(
       HEADLINE, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
       GRect(0, 0, w - 8, 64), GTextOverflowModeWordWrap, GTextAlignmentCenter);
+  // Compact the header's vertical rhythm on the short small classes so the
+  // note body clears the fold. The large branch keeps the verbatim inline
+  // expressions (not hoisted into locals) so emery/gabbro compile identically.
+#if defined(UI_SCREEN_SMALL_ROUND) || defined(UI_SCREEN_SMALL_RECT)
+  s_sun_cy = 6 + SUN_SIZE / 2;
+  s_head_y = s_sun_cy + SUN_SIZE / 2 + 4;
+  s_head_h = hs.h;
+  s_ver_y = s_head_y + s_head_h + 6;
+  int header_h = s_ver_y + 12;
+#else
   s_sun_cy = UI_HEADER_Y + SUN_SIZE / 2;
   s_head_y = s_sun_cy + SUN_SIZE / 2 + 6;
   s_head_h = hs.h;
   s_ver_y = s_head_y + s_head_h + 8;
   int header_h = s_ver_y + 24;
+#endif
 
   s_header = layer_create(GRect(0, 0, w, header_h));
   layer_set_update_proc(s_header, prv_header_update);
   layer_add_child(root, s_header);
 
+  // On small-round (chalk 180) the bottom curve clips the body's left edge;
+  // hold the scroll viewport above that band so a line never renders half-cut
+  // in the corner. Every other class keeps the verbatim full-height viewport.
+#if defined(UI_SCREEN_SMALL_ROUND)
+  s_scroll = scroll_layer_create(GRect(0, header_h, w, rb.size.h - header_h - 16));
+#else
   s_scroll = scroll_layer_create(GRect(0, header_h, w, rb.size.h - header_h));
+#endif
   scroll_layer_set_shadow_hidden(s_scroll, true);
   // Wires UP/DOWN to scroll; BACK keeps the default pop (dismiss).
   scroll_layer_set_click_config_onto_window(s_scroll, window);

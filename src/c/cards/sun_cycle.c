@@ -2,6 +2,7 @@
 #include "../theme.h"
 #include "../icons.h"
 #include "../ui.h"
+#include "../settings.h"
 #include "../anim.h"
 #include "../weather_data.h"
 
@@ -24,6 +25,54 @@ void card_sun_cycle_draw(GContext *ctx, GRect bounds) {
 
   // Header — horizon-sun icon for grid consistency with other cards.
   int header_y = UI_HEADER_Y;
+
+  // --- Big Mode (Stage B): bigger sunrise/sunset icons + bigger times. ---
+  // A font-bump card: both rows stay (this is the whole point of the card), the
+  // times scale via ui_font_title (-> BITHAM_30_BLACK in Big Mode) and the icons
+  // grow. Mandatory banner kept. Returns early -> Normal layout below untouched,
+  // Big-OFF pixel-identical.
+  if (settings_get_big_mode()) {
+    ui_draw_card_header_with_icon(ctx, bounds, "SUN CYCLE", theme_fg(),
+                                  header_y, 18, icon_draw_horizon_sun);
+    GFont tf = ui_font_title();  // BITHAM_30_BLACK in Big Mode
+    int isize, top_row_y, row_h;
+#if defined(UI_SCREEN_SMALL_RECT)
+    isize = 40; top_row_y = header_y + UI_HEADER_HEIGHT + 6;  row_h = 40;
+#elif defined(UI_SCREEN_SMALL_ROUND)
+    isize = 40; top_row_y = header_y + UI_HEADER_HEIGHT + 8;  row_h = 42;
+#elif defined(UI_SCREEN_LARGE_RECT)
+    isize = 52; top_row_y = header_y + UI_HEADER_HEIGHT + 16; row_h = 62;
+#else  // UI_SCREEN_LARGE_ROUND
+    isize = 52; top_row_y = header_y + UI_HEADER_HEIGHT + 22; row_h = 64;
+#endif
+    int gap = 12, bot_row_y = top_row_y + row_h;
+    // Sunrise row.
+    GSize srs = graphics_text_layout_get_content_size(d->sunrise, tf,
+        GRect(0, 0, W, 40), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+    int srx = prv_cluster_start_x(bounds, isize, gap, srs.w);
+    icon_draw_sunrise(ctx, GPoint(srx + isize / 2, top_row_y + isize / 2),
+                      isize, theme_accent_orange());
+    graphics_context_set_text_color(ctx, theme_fg());
+    graphics_draw_text(ctx, d->sunrise, tf,
+        GRect(srx + isize + gap, top_row_y + (isize - 30) / 2, srs.w + 6, 36),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+    ui_draw_dotted_hline(ctx, bounds.origin.x + UI_MARGIN_X + 6,
+                         bounds.origin.x + W - UI_MARGIN_X - 6,
+                         top_row_y + row_h - 4, theme_muted());
+    // Sunset row.
+    GSize sss = graphics_text_layout_get_content_size(d->sunset, tf,
+        GRect(0, 0, W, 40), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+    int ssx = prv_cluster_start_x(bounds, isize, gap, sss.w);
+    icon_draw_sunset(ctx, GPoint(ssx + isize / 2, bot_row_y + isize / 2),
+                     isize, theme_accent_blue());
+    graphics_draw_text(ctx, d->sunset, tf,
+        GRect(ssx + isize + gap, bot_row_y + (isize - 30) / 2, sss.w + 6, 36),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+    ui_draw_auto_banner(ctx, bounds, d->rain_alert_min, d->last_updated,
+                        anim_get_frame());
+    return;
+  }
+
   ui_draw_card_header_with_icon(ctx, bounds, "SUN CYCLE",
                                 theme_fg(),
                                 header_y, 18, icon_draw_horizon_sun);
@@ -32,12 +81,25 @@ void card_sun_cycle_draw(GContext *ctx, GRect bounds) {
   // time on the right of each row. To equalize edge whitespace, we
   // measure each time text and treat (icon + gap + time) as a single
   // cluster, centered horizontally in the card.
+  // Small classes (144x168 / 180x180): the 40px icon + 56px row pitch pushed
+  // the sunset row under the bottom banner. Shrink the icon and row pitch and
+  // tighten the top offset so both rows clear the banner (Phase 5.2). Large
+  // classes keep verbatim values -> emery/gabbro byte-identical.
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  int icon_size = 36;
+#else
   int icon_size = 40;
+#endif
   int gap = 10;
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  int row_h = 42;
+  int top_row_y = header_y + UI_HEADER_HEIGHT + 6;
+#else
   int row_h = 56;
   int top_row_y = header_y + UI_HEADER_HEIGHT + PBL_IF_ROUND_ELSE(20, 14);
+#endif
   int bot_row_y = top_row_y + row_h;
-  GFont time_font = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
+  GFont time_font = ui_font_title();
 
   // --- Sunrise row ---
   GSize sr_size = graphics_text_layout_get_content_size(d->sunrise, time_font,

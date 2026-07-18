@@ -3,7 +3,47 @@
 
 var Clay = require('@rebble/clay');
 var clayConfig = require('./config');
-var clay = new Clay(clayConfig, null, { autoHandleEvents: false });
+
+// Runs inside the Clay config page (serialized with toSource — must be
+// closure-free, ES5). Greys out everything that only applies while
+// PhoneManagesCards is on: the per-card toggles, the drag-order list and
+// HideSettingsCard. This mirrors comm.c's gate — without the grey-out, gated
+// values a user changed while the gate was off would silently snap back to
+// watch truth on the next open (the seed injection), which reads as a bug.
+// HideSettingsCard is additionally forced OFF while ungated (the on-watch
+// fail-safe AND makes it ineffective anyway; showing it checked would lie).
+var clayCustomFn = function(minified) {
+  var page = this;
+  page.on(page.EVENTS.AFTER_BUILD, function() {
+    var gate = page.getItemByMessageKey('PhoneManagesCards');
+    if (!gate) return;
+    var gated = [
+      'HideSettingsCard', 'CardOrder',
+      'CardEnabledHours', 'CardEnabledWeek', 'CardEnabledPrecip',
+      'CardEnabledUV', 'CardEnabledAQ', 'CardEnabledSun', 'CardEnabledNight',
+      'CardEnabledGolden', 'CardEnabledRadar', 'CardEnabledAdvice'
+    ];
+    function sync() {
+      var on = gate.get();
+      for (var i = 0; i < gated.length; i++) {
+        var item = page.getItemByMessageKey(gated[i]);
+        if (!item || !item.enable || !item.disable) continue;
+        if (on) {
+          item.enable();
+        } else {
+          if (gated[i] === 'HideSettingsCard') item.set(false);
+          item.disable();
+        }
+      }
+    }
+    gate.on('change', sync);
+    sync();
+  });
+};
+
+var clay = new Clay(clayConfig, clayCustomFn, { autoHandleEvents: false });
+// Custom drag-to-reorder card list (must be registered before generateUrl).
+clay.registerComponent(require('./cardorder'));
 
 var COND = {
   SUNNY: 0, PARTLY_CLOUDY: 1, CLOUDY: 2, RAIN: 3, SNOW: 4, STORM: 5, FOG: 6
@@ -127,7 +167,7 @@ function pollenGrainsToUpi(grass, birch, alder, ragweed, mugwort, olive) {
   }
   var vals = [
     grassScale(grass), treeScale(birch),   treeScale(alder),
-    weedScale(ragweed), weedScale(mugwort), grassScale(olive),
+    weedScale(ragweed), weedScale(mugwort), treeScale(olive),
   ];
   var max = -1;
   for (var i = 0; i < vals.length; i++) {
@@ -268,7 +308,25 @@ function xhr(url, cb) {
 // BigDataCloud's keyless client endpoint. Always invokes `done` with a
 // string: the freshly resolved name, or the last cached name, or '' —
 // never blocks or fails the weather fetch.
+//
+// Cached by ~1.1km coordinate cell (2 decimal places) for 24h — city names
+// rarely change, and this was previously a network hit on EVERY refresh.
+// Moving to a different cell misses the cache and refetches, so travel is
+// handled by construction. A failed or empty resolve never refreshes the
+// timestamp, so the next fetch retries.
+var GEO_TTL_MS = 24 * 60 * 60 * 1000;
+
 function reverseGeocode(lat, lon, done) {
+  var cellKey = lat.toFixed(2) + ',' + lon.toFixed(2);
+  var cachedName = localStorage.getItem('lastLocationName') || '';
+  var cachedAt = parseInt(localStorage.getItem('geoCacheAt') || '0', 10);
+  if (cachedName && cachedAt > 0 &&
+      localStorage.getItem('geoCacheCoords') === cellKey &&
+      Date.now() - cachedAt < GEO_TTL_MS) {
+    console.log('geocode cache hit: ' + cachedName);
+    done(cachedName);
+    return;
+  }
   var url = 'https://api.bigdatacloud.net/data/reverse-geocode-client' +
             '?latitude=' + lat + '&longitude=' + lon + '&localityLanguage=en';
   xhr(url, function(err, data) {
@@ -279,6 +337,8 @@ function reverseGeocode(lat, lon, done) {
     var name = data.city || data.locality || data.principalSubdivision || '';
     if (name) {
       localStorage.setItem('lastLocationName', name);
+      localStorage.setItem('geoCacheCoords', cellKey);
+      localStorage.setItem('geoCacheAt', String(Date.now()));
     } else {
       name = localStorage.getItem('lastLocationName') || '';
     }
@@ -297,7 +357,7 @@ function fetchWeather(lat, lon) {
   var fc = 'https://api.open-meteo.com/v1/forecast' +
     '?latitude=' + lat + '&longitude=' + lon +
     '&current=temperature_2m,apparent_temperature,relative_humidity_2m,dew_point_2m,weather_code,wind_speed_10m,wind_direction_10m,uv_index' +
-    '&hourly=temperature_2m,weather_code,precipitation_probability,wind_speed_10m,wind_direction_10m,precipitation' +
+    '&hourly=temperature_2m,weather_code,precipitation_probability,wind_speed_10m,wind_direction_10m,precipitation,uv_index' +
     '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset,uv_index_max' +
     '&temperature_unit=' + tempUnit +
     '&wind_speed_unit=' + windUnit +
@@ -307,7 +367,7 @@ function fetchWeather(lat, lon) {
     '?latitude=' + lat + '&longitude=' + lon +
     // Always request pollen fields. CAMS covers Europe; outside that
     // region the fields return null and we fall back to Google.
-    '&current=us_aqi,grass_pollen,birch_pollen,alder_pollen,ragweed_pollen,mugwort_pollen,olive_pollen' +
+    '&current=us_aqi,pm2_5,pm10,ozone,nitrogen_dioxide,grass_pollen,birch_pollen,alder_pollen,ragweed_pollen,mugwort_pollen,olive_pollen' +
     '&timezone=auto';
 
   // Resolve the city name first (best-effort), then fetch weather so the
@@ -315,7 +375,7 @@ function fetchWeather(lat, lon) {
   // calls back with a string, so a geocode failure never blocks weather.
   reverseGeocode(lat, lon, function(locName) {
   xhr(fc, function(err, data) {
-    if (err) { console.log('forecast err: ' + err.message); return; }
+    if (err) { console.log('forecast err: ' + err.message); fetchDone(); return; }
     xhr(aq, function(_e2, aqd) {
       var msg = {};
       msg.LocationName = (locName || '').substring(0, 31);
@@ -364,10 +424,19 @@ function fetchWeather(lat, lon) {
         // like "2026-05-06T14:00" when timezone=auto.
         var startIdx = 0;
         if (times.length) {
-          var now = new Date();
-          var pad = function(n) { return n < 10 ? '0' + n : '' + n; };
-          var nowKey = now.getFullYear() + '-' + pad(now.getMonth() + 1) +
-                       '-' + pad(now.getDate()) + 'T' + pad(now.getHours()) + ':00';
+          // Open-Meteo (timezone=auto) returns hourly.time in the LOCATION's
+          // timezone. cur.time is in that same tz, so key off it — using the
+          // phone's local clock would miss the match under a LocationOverride
+          // in a different timezone and silently start the bars at midnight.
+          var nowKey;
+          if (cur.time) {
+            nowKey = cur.time.slice(0, 13) + ':00';  // "2026-05-06T14" + ":00"
+          } else {
+            var now = new Date();
+            var pad = function(n) { return n < 10 ? '0' + n : '' + n; };
+            nowKey = now.getFullYear() + '-' + pad(now.getMonth() + 1) +
+                     '-' + pad(now.getDate()) + 'T' + pad(now.getHours()) + ':00';
+          }
           for (var k = 0; k < times.length; k++) {
             if (times[k] === nowKey) { startIdx = k; break; }
           }
@@ -380,6 +449,12 @@ function fetchWeather(lat, lon) {
         // so it agrees with the 6 Hours card's droplets.
         if (aqd && aqd.current) {
           msg.AQI = Math.round(aqd.current.us_aqi || 0);
+          // Phase 4 AIR DETAIL breakdown — pollutant concentrations (µg/m³).
+          // Open-Meteo names ozone/nitrogen_dioxide; we shorten to O3/NO2.
+          msg.PM25 = Math.round(aqd.current.pm2_5 || 0);
+          msg.PM10 = Math.round(aqd.current.pm10 || 0);
+          msg.O3   = Math.round(aqd.current.ozone || 0);
+          msg.NO2  = Math.round(aqd.current.nitrogen_dioxide || 0);
         }
         msg.Units = units === 'metric' ? 1 : 0;
         msg.LastUpdated = Math.floor(Date.now() / 1000);
@@ -396,6 +471,7 @@ function fetchWeather(lat, lon) {
         var hWind  = hourly.wind_speed_10m || [];
         var hWdir  = hourly.wind_direction_10m || [];
         var hPrcp  = hourly.precipitation || [];
+        var hUv    = hourly.uv_index || [];
 
         // Rain alert: first hour (now..+6h) with a *measurable* amount, using
         // the same metric the 6 Hours card uses to draw a droplet
@@ -430,6 +506,8 @@ function fetchWeather(lat, lon) {
           msg['Hour' + hi + 'WindDir'] = degToCompass(hWdir[idx] || 0);
           // Precip amount as integer tenths of in/mm (avoids floats on watch).
           msg['Hour' + hi + 'Precip']  = Math.round((hPrcp[idx] || 0) * 10);
+          // UV index (integer) for the UV modal's hourly curve.
+          msg['Hour' + hi + 'Uv']      = Math.round(hUv[idx] || 0);
         }
 
         // Phase 10B: Week Ahead (today + next 4 days = 5 total).
@@ -486,24 +564,60 @@ function fetchWeather(lat, lon) {
         }
       } catch (e) {
         console.log('parse err: ' + e.message);
+        fetchDone();
         return;
       }
       Pebble.sendAppMessage(msg,
         function() {
           console.log('weather sent');
+          // Successful round-trip: record freshness for the `ready` gate.
+          localStorage.setItem('lastFetchAt', String(Date.now()));
+          fetchDone();
           // Only call Google proxy for non-European locations.
           if (!gotPollenFromOpenMeteo) {
             fetchPollen(lat, lon);
           }
         },
-        function(e) { console.log('send fail: ' + JSON.stringify(e)); }
+        function(e) {
+          console.log('send fail: ' + JSON.stringify(e));
+          fetchDone();
+        }
       );
     });
   });
   });
 }
 
+// Fetch dedupe. Launch used to double-fetch: PKJS `ready` fired one chain
+// AND the C side's 750ms LastUpdated sentinel fired another. The in-flight
+// guard absorbs whichever arrives second; `lastFetchAt` (set only on a
+// successful send) lets `ready` skip entirely when data is fresh, mirroring
+// the C side's 15-minute open-refresh gate. The sentinel path stays ungated
+// by freshness — it's the fail-safe for wiped watch storage, manual refresh
+// and background wakeups (min bg interval 30min > gate, never starved).
+var FETCH_FRESH_MS = 15 * 60 * 1000;      // matches comm.c threshold_secs
+var FETCH_IN_FLIGHT_MS = 20000;           // xhr timeout is 15s; self-heals
+var fetchStartedAt = 0;
+
+function fetchDone() { fetchStartedAt = 0; }
+
+function maybeInitialFetch() {
+  var last = parseInt(localStorage.getItem('lastFetchAt') || '0', 10);
+  var age = Date.now() - last;
+  if (last > 0 && age < FETCH_FRESH_MS) {
+    console.log('ready: last fetch ' + Math.round(age / 1000) +
+                's ago, skipping');
+    return;
+  }
+  locateAndFetch();
+}
+
 function locateAndFetch() {
+  if (Date.now() - fetchStartedAt < FETCH_IN_FLIGHT_MS) {
+    console.log('fetch already in flight, skipping');
+    return;
+  }
+  fetchStartedAt = Date.now();
   var override = localStorage.getItem('locationOverride');
   if (override) {
     var parts = override.split(',');
@@ -529,21 +643,28 @@ function locateAndFetch() {
 // ----------------------------------------------------------------------
 
 var RADAR_CHUNK_SIZE = 1500;
-// Shared secret for the Vercel proxy (RADAR_SECRET env var). Kept URL-safe
-// (no '#', '&', '@', etc.) so it can be embedded directly in a query string
-// without encoding gymnastics. Prior values containing '#' were silently
-// truncated by the HTTP client at the fragment marker, causing 401s.
-// NOTE: remove the ?key=... before committing to a public repo.
-var RADAR_PROXY_URL = 'https://touchyweather-radar-proxy.vercel.app/api/radar?key=tw-radar-prod-Xk7nQ2v9LpR4Mj8a';
+// Shared secret for the Vercel proxy (RADAR_SECRET env var), loaded from
+// gitignored secrets.js (template: secrets.js.example) so the key never
+// lands in the public repo. Kept URL-safe (no '#', '&', '@', etc.) so it can
+// be embedded directly in a query string without encoding gymnastics. Prior
+// values containing '#' were silently truncated by the HTTP client at the
+// fragment marker, causing 401s. With an empty key the proxy endpoints just
+// 401 and radar/pollen/analytics degrade gracefully.
+var PROXY_KEY = require('./secrets').PROXY_KEY;
+function proxyUrl(path) {
+  var u = 'https://touchyweather-radar-proxy.vercel.app/api/' + path;
+  return PROXY_KEY ? u + '?key=' + PROXY_KEY : u;
+}
+var RADAR_PROXY_URL = proxyUrl('radar');
 
 // Pollen proxy shares the same Vercel project + RADAR_SECRET auth key
 // as the radar endpoint, so the URL differs only in the /api path.
-var POLLEN_PROXY_URL = 'https://touchyweather-radar-proxy.vercel.app/api/pollen?key=tw-radar-prod-Xk7nQ2v9LpR4Mj8a';
+var POLLEN_PROXY_URL = proxyUrl('pollen');
 
 // Anonymous analytics ping. Same Vercel project + RADAR_SECRET auth key as
 // radar/pollen. The server hashes the id and stores only aggregate counts —
 // nothing identifiable leaves the device. See proxy/api/track.js.
-var TRACK_PROXY_URL = 'https://touchyweather-radar-proxy.vercel.app/api/track?key=tw-radar-prod-Xk7nQ2v9LpR4Mj8a';
+var TRACK_PROXY_URL = proxyUrl('track');
 
 // Pollen is throttled to one proxy fetch per 6 hours per device.
 // Between fetches the last known level is re-sent from localStorage so
@@ -653,7 +774,7 @@ function trackPing(lat, lon) {
     };
     req.onerror = function() { console.log('track err'); };
     req.ontimeout = function() { console.log('track timeout'); };
-    req.send(JSON.stringify({ id: id, lat: rLat, lon: rLon }));
+    req.send(JSON.stringify({ id: id, lat: rLat, lon: rLon, variant: 'app' }));
   } catch (e) {
     console.log('track exception: ' + e.message);
   }
@@ -688,8 +809,11 @@ function sendRadarStatus(status) {
   Pebble.sendAppMessage({ RadarStatus: status });
 }
 
+var RADAR_CHUNK_MAX_TRIES = 3;
 function sendRadarChunk(chunkIdx, total, w, h, ts, byteArr, onAllDone) {
+  var tries = 0;
   function send() {
+    tries++;
     var msg = {
       RadarChunkIdx: chunkIdx,
       RadarChunkTotal: total,
@@ -703,10 +827,17 @@ function sendRadarChunk(chunkIdx, total, w, h, ts, byteArr, onAllDone) {
         if (onAllDone) onAllDone();
       }
     }, function(e) {
-      // Retry once after a brief pause; transient drop is common when
-      // the watch is busy redrawing.
-      console.log('radar chunk ' + chunkIdx + ' failed, retrying');
-      setTimeout(send, 1500);
+      // Retry after a brief pause; transient drop is common when the watch is
+      // busy redrawing. Cap the attempts so a persistently flaky link can't
+      // loop forever draining battery — after the last try, report the error
+      // status so the watch UI resolves out of its loading state.
+      if (tries < RADAR_CHUNK_MAX_TRIES) {
+        console.log('radar chunk ' + chunkIdx + ' failed, retry ' + tries);
+        setTimeout(send, 1500);
+      } else {
+        console.log('radar chunk ' + chunkIdx + ' failed after ' + tries + ' tries, giving up');
+        sendRadarStatus(3);
+      }
     });
   }
   send();
@@ -809,18 +940,51 @@ Pebble.addEventListener('ready', function() {
   if (interval !== null) {
     console.log('Re-syncing BackgroundUpdateInterval=' + interval + ' to watch');
     Pebble.sendAppMessage({ BackgroundUpdateInterval: interval },
-      function() { locateAndFetch(); },
-      function() { locateAndFetch(); });
+      function() { maybeInitialFetch(); },
+      function() { maybeInitialFetch(); });
   } else {
-    locateAndFetch();
+    maybeInitialFetch();
   }
 });
+
+// Watch→Clay seed: message keys the watch pushes to describe its current card
+// config. Cached in localStorage and injected into Clay's persisted settings
+// right before the config page opens, so Clay always shows the watch's TRUE
+// state (on-watch toggles/reorders are no longer wiped by a Clay save).
+var WATCH_CARD_STATE_KEYS = [
+  'CardOrder', 'PhoneManagesCards', 'HideSettingsCard',
+  'CardEnabledHours', 'CardEnabledWeek', 'CardEnabledPrecip', 'CardEnabledUV',
+  'CardEnabledAQ', 'CardEnabledSun', 'CardEnabledNight', 'CardEnabledGolden',
+  'CardEnabledRadar', 'CardEnabledAdvice'
+];
+
+function cacheWatchCardState(p) {
+  var state = {};
+  try {
+    state = JSON.parse(localStorage.getItem('watchCardState') || '{}');
+  } catch (e) { state = {}; }
+  for (var i = 0; i < WATCH_CARD_STATE_KEYS.length; i++) {
+    var k = WATCH_CARD_STATE_KEYS[i];
+    if (p[k] === undefined) continue;
+    // CardOrder rides as a CSV string; everything else is a 0/1 flag that
+    // Clay stores as a boolean (checkbox manipulator).
+    state[k] = (k === 'CardOrder') ? String(p[k]) : !!p[k];
+  }
+  localStorage.setItem('watchCardState', JSON.stringify(state));
+  console.log('watch card state cached: ' + JSON.stringify(state));
+}
 
 Pebble.addEventListener('appmessage', function(e) {
   var p = (e && e.payload) || {};
   if (p.RadarRequest) {
     console.log('appmessage: RadarRequest');
     fetchRadar();
+    return;
+  }
+  // Watch card-state seed (identified by the CardOrder key, which only the
+  // watch's state push carries watch→phone). Cache and stop — never fetch.
+  if (p.CardOrder !== undefined) {
+    cacheWatchCardState(p);
     return;
   }
   // The watch reports its system clock style with each refresh request so the
@@ -840,11 +1004,39 @@ Pebble.addEventListener('appmessage', function(e) {
 });
 
 Pebble.addEventListener('showConfiguration', function() {
+  // Inject the watch's cached card state into Clay's persisted settings so
+  // the page opens showing the watch's true order/visibility. setSettings
+  // writes the same 'clay-settings' store generateUrl() reads.
+  try {
+    var watchState = JSON.parse(localStorage.getItem('watchCardState') || 'null');
+    if (watchState) {
+      clay.setSettings(watchState);
+      console.log('injected watch card state into Clay settings');
+    }
+  } catch (e) {
+    console.log('watch card state inject skipped: ' + e.message);
+  }
   Pebble.openURL(clay.generateUrl());
 });
 
+// The localStorage keys whose values are baked into the weather message
+// phone-side (unit conversion, time formatting, flags that ride along and
+// get cache-persisted on the watch only via a fetch). Only a change to one
+// of these needs a refetch after a Clay save; theme/card/nav-only saves
+// used to fire a full 3-call fetch for nothing.
+function weatherRelevantSnapshot() {
+  return [
+    localStorage.getItem('units'),
+    localStorage.getItem('useDewPoint'),
+    localStorage.getItem('showLocation'),
+    localStorage.getItem('timeFormat'),
+    localStorage.getItem('locationOverride')
+  ].join('|');
+}
+
 Pebble.addEventListener('webviewclosed', function(e) {
   if (!e || !e.response) return;
+  var beforeSave = weatherRelevantSnapshot();
   var dict = clay.getSettings(e.response, false);
   if (dict.Units !== undefined) {
     // Clay radiogroup values come back as strings ("0"/"1"), so coerce
@@ -871,10 +1063,46 @@ Pebble.addEventListener('webviewclosed', function(e) {
   } else {
     localStorage.removeItem('locationOverride');
   }
+  // Optimistically update the watch-state seed cache with what this save will
+  // make the watch's card state, mirroring comm.c's gate logic exactly:
+  // PhoneManagesCards + HideSettingsCard are stored on the watch
+  // unconditionally; CardEnabled*/CardOrder apply only while the gate is ON.
+  // Without this, reopening Clay before the watch pushes a fresh seed would
+  // inject pre-save (stale) values over the settings just saved. The watch's
+  // own re-push after applying (comm.c) remains the authoritative corrector.
+  try {
+    var wcs = JSON.parse(localStorage.getItem('watchCardState') || '{}');
+    if (dict.PhoneManagesCards !== undefined) {
+      wcs.PhoneManagesCards = !!dict.PhoneManagesCards.value;
+    }
+    if (dict.HideSettingsCard !== undefined) {
+      wcs.HideSettingsCard = !!dict.HideSettingsCard.value;
+    }
+    if (wcs.PhoneManagesCards) {
+      for (var wi = 0; wi < WATCH_CARD_STATE_KEYS.length; wi++) {
+        var wk = WATCH_CARD_STATE_KEYS[wi];
+        if (wk === 'PhoneManagesCards' || wk === 'HideSettingsCard') continue;
+        if (dict[wk] === undefined) continue;
+        wcs[wk] = (wk === 'CardOrder') ? String(dict[wk].value)
+                                       : !!dict[wk].value;
+      }
+    }
+    localStorage.setItem('watchCardState', JSON.stringify(wcs));
+    console.log('watch card state cache updated from Clay save');
+  } catch (err) {
+    console.log('watch card state cache update skipped: ' + err.message);
+  }
+  // Refetch only when a weather-relevant setting actually changed. Not gated
+  // by lastFetchAt — a units change needs freshly converted data regardless
+  // of age. Kept in both send callbacks, as before.
+  var needsFetch = (weatherRelevantSnapshot() !== beforeSave);
+  function afterSave() {
+    if (needsFetch) {
+      locateAndFetch();
+    } else {
+      console.log('config saved, no weather-relevant change, skipping fetch');
+    }
+  }
   var msg = clay.getSettings(e.response);
-  Pebble.sendAppMessage(msg, function() {
-    locateAndFetch();
-  }, function() {
-    locateAndFetch();
-  });
+  Pebble.sendAppMessage(msg, afterSave, afterSave);
 });

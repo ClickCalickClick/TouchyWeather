@@ -31,3 +31,10 @@ void refresh_sheet_on_data_received(void);
 // fallthrough) use this to lock out other input while the sheet is open
 // or animating.
 bool refresh_sheet_is_active(void);
+
+// Open the sheet programmatically (no touch), running the full
+// OPENING → LOADING → close feedback cycle and kicking off a weather
+// refresh. Used by the button-triggered refresh (SELECT on the Main card)
+// so non-touch platforms have a manual-refresh path. No-op if a sheet is
+// already active.
+void refresh_sheet_show_programmatic(void);

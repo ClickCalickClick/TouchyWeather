@@ -2,6 +2,7 @@
 #include "../theme.h"
 #include "../icons.h"
 #include "../ui.h"
+#include "../settings.h"
 #include "../weather_data.h"
 #include "../anim.h"
 #include <stdio.h>
@@ -580,7 +581,7 @@ static const char *const *prv_phrase_pool_for_tier(const WeatherData *d,
 }
 
 static void prv_audit_phrases(GRect body_r) {
-  GFont f = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
+  GFont f = ui_font_body();
   for (int t = 0; t < ADV_TIER_COUNT; ++t) {
     const AdviceTierDef *def = &TIERS[t];
     for (int i = 0; i < def->phrase_count; ++i) {
@@ -816,9 +817,57 @@ void card_advice_draw(GContext *ctx, GRect bounds) {
                                 theme_fg(),
                                 header_y, 18, icon_draw_tap);
 
+  // --- Big Mode (Stage B): promote the data headline, drop the tier badge. ---
+  // The tier badge is cut (the headline states the same trigger). The headline
+  // (the "why", e.g. "FEELS LIKE 97°") becomes the big one-line focus; the quip
+  // wraps in the space the badge freed. Mandatory banner KEPT (an earlier plan
+  // dropped it — not allowed). Note: on the tight small-rect the quip box is
+  // ~2 lines at 24B, so the longest phrases can still clip — the headline (the
+  // actual data) always shows; a short-phrase small-class pool is the clean
+  // follow-up. Returns early -> Normal badge+two-tone layout below untouched,
+  // Big-OFF pixel-identical.
+  if (settings_get_big_mode()) {
+    char headline_buf[32];
+    prv_generate_tier_headline(tier, d, headline_buf, sizeof(headline_buf));
+    uint32_t seed = d->last_updated ? d->last_updated
+                                    : (uint32_t)(time(NULL) / 60);
+    int phrase_count = 0;
+    const char *const *phrase_pool = prv_phrase_pool_for_tier(d, tier, &phrase_count);
+    if (phrase_count <= 0 || !phrase_pool) {
+      phrase_pool = def->phrases;
+      phrase_count = def->phrase_count;
+    }
+    const char *phrase = phrase_pool[(int)(seed % (uint32_t)phrase_count)];
+
+    int ox = bounds.origin.x;
+    int head_y, quip_y, quip_bot;
+#if defined(UI_SCREEN_SMALL_RECT)
+    head_y = header_y + UI_HEADER_HEIGHT + 6;  quip_y = 68;  quip_bot = 118;
+#elif defined(UI_SCREEN_SMALL_ROUND)
+    head_y = header_y + UI_HEADER_HEIGHT + 8;  quip_y = 84;  quip_bot = 132;
+#elif defined(UI_SCREEN_LARGE_RECT)
+    head_y = header_y + UI_HEADER_HEIGHT + 6;  quip_y = 76;  quip_bot = 178;
+#else  // UI_SCREEN_LARGE_ROUND
+    head_y = header_y + UI_HEADER_HEIGHT + 10; quip_y = 98;  quip_bot = 195;
+#endif
+    // Headline — the data, one line, full-contrast fg.
+    graphics_context_set_text_color(ctx, theme_fg());
+    graphics_draw_text(ctx, headline_buf, ui_font_body(),
+        GRect(ox + UI_MARGIN_X, head_y, W - 2 * UI_MARGIN_X, 34),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+    // Quip — wrapped flavor text in the space the badge freed.
+    graphics_context_set_text_color(ctx, theme_fg());
+    graphics_draw_text(ctx, phrase, ui_font_body(),
+        GRect(ox + UI_MARGIN_X, quip_y, W - 2 * UI_MARGIN_X, quip_bot - quip_y),
+        GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
+    ui_draw_auto_banner(ctx, bounds, d->rain_alert_min, d->last_updated,
+                        anim_get_frame());
+    return;
+  }
+
   // Tier badge (icon + tier name) — small, right under the header.
   int badge_y = header_y + UI_HEADER_HEIGHT + PBL_IF_ROUND_ELSE(8, 4);
-  GFont badge_font = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
+  GFont badge_font = ui_font_label();
   GSize bsize = graphics_text_layout_get_content_size(def->label, badge_font,
       GRect(0, 0, W, 20), GTextOverflowModeTrailingEllipsis,
       GTextAlignmentLeft);
@@ -869,7 +918,7 @@ void card_advice_draw(GContext *ctx, GRect bounds) {
   prv_generate_tier_headline(tier, d, headline_buf, sizeof(headline_buf));
   graphics_context_set_text_color(ctx, accent);
   graphics_draw_text(ctx, headline_buf,
-      fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+      ui_font_header(),
       headline_r, GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
 
   // --- Quip row (fg color, Gothic 24 Bold) ---
@@ -880,7 +929,7 @@ void card_advice_draw(GContext *ctx, GRect bounds) {
   if (!s_audited) { prv_audit_phrases(quip_r); s_audited = true; }
   graphics_context_set_text_color(ctx, theme_fg());
   graphics_draw_text(ctx, phrase,
-      fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+      ui_font_body(),
       quip_r, GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
 
   // Standard auto status banner so this card stays consistent with peers.

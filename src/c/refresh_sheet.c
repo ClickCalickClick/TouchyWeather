@@ -3,6 +3,8 @@
 #include "comm.h"
 #include "anim.h"
 #include "nav.h"
+#include "detail_modal.h"
+#include "weather_data.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -31,6 +33,12 @@
 // Minimum time the sheet stays open before closing, even on instant data.
 #define LOADING_MIN_DISPLAY_MS    900
 
+// Manual-refresh cooldown: within this window of the last successful update,
+// a pull/SELECT still opens the sheet (the gesture must never feel dead) but
+// shows "Already up to date" instead of firing another 3-call fetch chain.
+// After a FAILED fetch last_updated stays old, so retries are never blocked.
+#define REFRESH_COOLDOWN_SECS     60
+
 // Phrases ------------------------------------------------------------------
 
 static const char *const s_phrases[] = {
@@ -45,6 +53,8 @@ static const char *const s_phrases[] = {
 #define PHRASE_COUNT ((int)(sizeof(s_phrases) / sizeof(s_phrases[0])))
 
 static const char *const FALLBACK_PHRASE = "Couldn't reach the forecast just now...";
+
+static const char *const UP_TO_DATE_PHRASE = "Already up to date";
 
 // Module state -------------------------------------------------------------
 
@@ -75,6 +85,7 @@ static AppTimer *s_timeout_timer = NULL;
 static AppTimer *s_close_holdoff_timer = NULL;
 static int       s_phrase_idx = 0;
 static bool      s_show_fallback = false;
+static bool      s_up_to_date = false;
 static uint64_t  s_loading_start_ms = 0;
 static bool      s_data_received_pending = false;
 
@@ -84,6 +95,14 @@ static uint64_t prv_now_ms(void) {
   time_t s; uint16_t ms;
   time_ms(&s, &ms);
   return (uint64_t)s * 1000ULL + (uint64_t)ms;
+}
+
+// Within the manual-refresh cooldown of the last real update?
+static bool prv_data_is_fresh(void) {
+  WeatherData *d = weather_data_get();
+  if (!d->valid || d->last_updated == 0) return false;  // mock/no data
+  uint32_t now = (uint32_t)time(NULL);
+  return (now - d->last_updated) < REFRESH_COOLDOWN_SECS;
 }
 
 static void prv_cancel_timer(AppTimer **t) {
@@ -143,6 +162,7 @@ static void prv_slide_tick(void *ctx) {
       prv_enter_loading();
     } else if (s_state == REFRESH_CLOSING) {
       s_state = REFRESH_IDLE;
+      s_up_to_date = false;
       prv_cancel_timer(&s_phrase_timer);
       prv_cancel_timer(&s_timeout_timer);
       prv_cancel_timer(&s_close_holdoff_timer);
@@ -199,6 +219,14 @@ static void prv_enter_loading(void) {
   prv_cancel_timer(&s_phrase_timer);
   prv_cancel_timer(&s_timeout_timer);
   prv_cancel_timer(&s_close_holdoff_timer);
+  if (s_up_to_date) {
+    // Cooldown hit: no fetch is in flight, so skip the phrase rotation and
+    // the 6s timeout — just hold the message briefly, then slide away.
+    s_close_holdoff_timer = app_timer_register(LOADING_FALLBACK_HOLD_MS,
+                                               prv_close_holdoff_tick, NULL);
+    prv_mark_dirty();
+    return;
+  }
   s_phrase_timer = app_timer_register(PHRASE_ROTATE_MS, prv_phrase_tick, NULL);
   s_timeout_timer = app_timer_register(LOADING_TIMEOUT_MS, prv_timeout_tick, NULL);
   prv_mark_dirty();
@@ -331,8 +359,9 @@ static void prv_sheet_update(Layer *layer, GContext *ctx) {
 
   // Phrase text only when the sheet is mostly open.
   if (b.size.h >= s_sheet_h * 2 / 3) {
-    const char *phrase = s_show_fallback ? FALLBACK_PHRASE
-                                         : s_phrases[s_phrase_idx];
+    const char *phrase = s_up_to_date   ? UP_TO_DATE_PHRASE
+                        : s_show_fallback ? FALLBACK_PHRASE
+                                          : s_phrases[s_phrase_idx];
     int text_y = cy + 28;
     int text_h = b.size.h - (text_y - b.origin.y) - 8;
     if (text_h < 24) text_h = 24;
@@ -362,6 +391,7 @@ void refresh_sheet_init(Window *window) {
   s_sheet_y = 0;
   s_pull_dy = 0;
   s_claimed_gesture = false;
+  s_up_to_date = false;
 }
 
 void refresh_sheet_deinit(void) {
@@ -378,6 +408,25 @@ void refresh_sheet_deinit(void) {
 
 bool refresh_sheet_is_active(void) {
   return s_state != REFRESH_IDLE;
+}
+
+void refresh_sheet_show_programmatic(void) {
+  // One overlay at a time: ignore if a sheet or detail modal is up.
+  if (s_state != REFRESH_IDLE) return;
+  if (detail_modal_is_active()) return;
+  // Enter the same OPENING → LOADING path a committed pull uses, minus the
+  // touch tracking: start closed (y=0) and slide fully open. This gives
+  // button-only platforms (and button users on touch models) identical
+  // spinner/phrase feedback.
+  s_state = REFRESH_OPENING;
+  s_data_received_pending = false;
+  s_claimed_gesture = false;
+  s_pull_dy = 0;
+  s_sheet_y = 0;
+  anim_kick();  // ensure the 10 Hz ticker runs so the spinner rotates
+  s_up_to_date = prv_data_is_fresh();
+  if (!s_up_to_date) comm_request_refresh();
+  prv_start_slide(s_sheet_h);
 }
 
 bool refresh_sheet_on_touchdown(int16_t x, int16_t y) {
@@ -450,7 +499,8 @@ bool refresh_sheet_on_liftoff(int16_t x, int16_t y) {
   if (s_pull_dy >= PULL_FULL_THRESHOLD) {
     s_state = REFRESH_OPENING;
     s_data_received_pending = false;
-    comm_request_refresh();
+    s_up_to_date = prv_data_is_fresh();
+    if (!s_up_to_date) comm_request_refresh();
     prv_start_slide(s_sheet_h);
   } else {
     // Cancel — slide back up.

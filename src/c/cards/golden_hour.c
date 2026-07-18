@@ -2,8 +2,18 @@
 #include "../theme.h"
 #include "../icons.h"
 #include "../ui.h"
+#include "../settings.h"
 #include "../anim.h"
 #include "../weather_data.h"
+#include <string.h>
+
+// Copies a "H:MM AM"/"H:MM PM" time string up to (not including) the space,
+// so the AM/PM suffix can be dropped when a column header already carries it.
+static void prv_strip_ampm(const char *src, char *dst, size_t n) {
+  size_t i = 0;
+  for (; i + 1 < n && src[i] && src[i] != ' '; ++i) dst[i] = src[i];
+  dst[i] = '\0';
+}
 
 // Phase 11: Golden Hour card.
 //
@@ -43,6 +53,93 @@ void card_golden_hour_draw(GContext *ctx, GRect bounds) {
 
   // Header.
   int header_y = UI_HEADER_Y;
+
+  // --- Big Mode (Stage B): 2x2 AM/PM grid — KEEPS all 4 milestones. ---
+  // (An earlier plan cut the two blue-hour rows; not allowed — no modal exists
+  // for this card, so all four must stay visible.) Rows = blue / gold, columns =
+  // AM / PM. Band identity is carried by SHAPE (filled square = blue, outline =
+  // gold) so it survives the Big-Mode contrast collapse; the AM/PM column header
+  // lets the time suffix drop. Two times per row is wide, so times use
+  // ui_font_header (18B small / 24B large) and BLUE/GOLD word labels appear on
+  // the large classes only. Mandatory banner kept. Returns early -> Normal 4-row
+  // layout below untouched, Big-OFF pixel-identical.
+  if (settings_get_big_mode()) {
+    ui_draw_card_header_with_icon(ctx, bounds, "GOLDEN HOUR", theme_fg(),
+                                  header_y, 18, icon_draw_horizon_sun);
+    char am_t[2][8], pm_t[2][8];
+    prv_strip_ampm(d->blue_am, am_t[0], sizeof(am_t[0]));  // blue row, AM col
+    prv_strip_ampm(d->blue_pm, pm_t[0], sizeof(pm_t[0]));  // blue row, PM col
+    prv_strip_ampm(d->gold_am, am_t[1], sizeof(am_t[1]));  // gold row, AM col
+    prv_strip_ampm(d->gold_pm, pm_t[1], sizeof(pm_t[1]));  // gold row, PM col
+    static const char *words[2] = {"BLUE", "GOLD"};
+
+    GFont tf = ui_font_header();   // 18B small / 24B large (2 times per row)
+    GFont hf = ui_font_caption();  // AM/PM column headers
+    GFont wf = ui_font_label();    // BLUE/GOLD words (large only)
+    int shape, gap, colgap, hdr_y, row1_y, row2_y, th, showword;
+#if defined(UI_SCREEN_SMALL_RECT)
+    shape = 14; gap = 6; colgap = 12; hdr_y = header_y + UI_HEADER_HEIGHT + 8;  row1_y = 62;  row2_y = 90;  th = 26; showword = 0;
+#elif defined(UI_SCREEN_SMALL_ROUND)
+    shape = 14; gap = 6; colgap = 12; hdr_y = header_y + UI_HEADER_HEIGHT + 8;  row1_y = 76;  row2_y = 104; th = 26; showword = 0;
+#elif defined(UI_SCREEN_LARGE_RECT)
+    shape = 18; gap = 10; colgap = 18; hdr_y = header_y + UI_HEADER_HEIGHT + 10; row1_y = 74;  row2_y = 118; th = 32; showword = 1;
+#else  // UI_SCREEN_LARGE_ROUND
+    shape = 18; gap = 10; colgap = 18; hdr_y = header_y + UI_HEADER_HEIGHT + 14; row1_y = 96;  row2_y = 142; th = 32; showword = 1;
+#endif
+    // Uniform time-column width across all four cells.
+    int time_w = 0, kind_w = 0;
+    for (int r = 0; r < 2; ++r) {
+      GSize a = graphics_text_layout_get_content_size(am_t[r], tf,
+          GRect(0, 0, W, 30), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+      if (a.w > time_w) time_w = a.w;
+      GSize p = graphics_text_layout_get_content_size(pm_t[r], tf,
+          GRect(0, 0, W, 30), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+      if (p.w > time_w) time_w = p.w;
+    }
+    if (showword) kind_w = prv_max_w(wf, words, 2);
+    int word_col = showword ? (kind_w + gap) : 0;
+    int cluster_w = word_col + shape + gap + time_w + colgap + time_w;
+    int cluster_x = ox + (W - cluster_w) / 2;
+    int floor_x = ox + UI_MARGIN_X;
+    if (cluster_x < floor_x) cluster_x = floor_x;
+    int shape_x = cluster_x + word_col;
+    int am_x = shape_x + shape + gap;
+    int pm_x = am_x + time_w + colgap;
+
+    // Column headers.
+    graphics_context_set_text_color(ctx, theme_secondary());
+    graphics_draw_text(ctx, "AM", hf, GRect(am_x, hdr_y, time_w + 4, 18),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+    graphics_draw_text(ctx, "PM", hf, GRect(pm_x, hdr_y, time_w + 4, 18),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+
+    for (int r = 0; r < 2; ++r) {
+      int y = (r == 0) ? row1_y : row2_y;
+      GRect sq = GRect(shape_x, y + (th - shape) / 2, shape, shape);
+      if (r == 0) {  // BLUE — filled square
+        graphics_context_set_fill_color(ctx, theme_fg());
+        graphics_fill_rect(ctx, sq, 2, GCornersAll);
+      } else {       // GOLD — outline square
+        graphics_context_set_stroke_color(ctx, theme_fg());
+        graphics_context_set_stroke_width(ctx, 2);
+        graphics_draw_rect(ctx, sq);
+      }
+      if (showword) {
+        graphics_context_set_text_color(ctx, theme_fg());
+        graphics_draw_text(ctx, words[r], wf, GRect(cluster_x, y, kind_w + 4, th),
+            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+      }
+      graphics_context_set_text_color(ctx, theme_fg());
+      graphics_draw_text(ctx, am_t[r], tf, GRect(am_x, y, time_w + 4, th),
+          GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+      graphics_draw_text(ctx, pm_t[r], tf, GRect(pm_x, y, time_w + 4, th),
+          GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+    }
+    ui_draw_auto_banner(ctx, bounds, d->rain_alert_min, d->last_updated,
+                        anim_get_frame());
+    return;
+  }
+
   ui_draw_card_header_with_icon(ctx, bounds, "GOLDEN HOUR",
                                 theme_fg(),
                                 header_y, 18, icon_draw_horizon_sun);
@@ -59,8 +156,8 @@ void card_golden_hour_draw(GContext *ctx, GRect bounds) {
   // Uniform column widths: measure max kind-label and max time-string
   // so all four rows align cleanly regardless of "AM"/"PM" character
   // count.
-  GFont label_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
-  GFont time_font  = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  GFont label_font = ui_font_header();
+  GFont time_font  = ui_font_header();
 
   const char *kinds[4] = { rows[0].kind, rows[1].kind, rows[2].kind, rows[3].kind };
   const char *times[4] = { rows[0].time_str, rows[1].time_str, rows[2].time_str, rows[3].time_str };

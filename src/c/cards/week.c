@@ -2,6 +2,7 @@
 #include "../theme.h"
 #include "../icons.h"
 #include "../ui.h"
+#include "../settings.h"
 #include "../anim.h"
 #include "../weather_data.h"
 #include <stdio.h>
@@ -39,15 +40,109 @@ void card_week_draw(GContext *ctx, GRect bounds) {
   WeatherData *d = weather_data_get();
   int W = bounds.size.w;
 
+  // --- Big Mode (Stage B): fewer, bigger day rows. ---
+  // 3 days (small classes) / 5 days (large) of day + ↑high ↓low. The arrows
+  // carry the hi-vs-lo meaning (accents are fg in Big Mode), replacing the
+  // Normal card's hue-coded high / muted-low + "/" separator. Two temperatures
+  // per row is wide, so the row uses ui_font_header (18B small / 24B large,
+  // a tier below 6 Hours' single-temp rows) and drops the condition icon on
+  // the tight 144/180px small classes. POP% and days 4–5-on-small drop — all
+  // still in the Week detail modal. Mandatory status banner kept. Returns early
+  // -> Normal 5-row layout below untouched, Big-OFF pixel-identical.
+  if (settings_get_big_mode()) {
+    GFont rf = ui_font_header();  // 18B small / 24B large in Big Mode
+    int n_days, row_icon, row_h, top_y, arrow, hdr_icon;
+#if defined(UI_SCREEN_SMALL_RECT)
+    n_days = 3; row_icon = 0;  row_h = 26; top_y = UI_HEADER_Y + UI_HEADER_HEIGHT + 6;  arrow = 10; hdr_icon = 18;
+#elif defined(UI_SCREEN_SMALL_ROUND)
+    n_days = 3; row_icon = 0;  row_h = 26; top_y = UI_HEADER_Y + UI_HEADER_HEIGHT + 6;  arrow = 10; hdr_icon = 18;
+#elif defined(UI_SCREEN_LARGE_RECT)
+    n_days = 5; row_icon = 20; row_h = 26; top_y = UI_HEADER_Y + UI_HEADER_HEIGHT + 14; arrow = 12; hdr_icon = 18;
+#else  // UI_SCREEN_LARGE_ROUND
+    n_days = 5; row_icon = 22; row_h = 27; top_y = UI_HEADER_Y + UI_HEADER_HEIGHT + 14; arrow = 12; hdr_icon = 18;
+#endif
+    ui_draw_card_header_with_icon(ctx, bounds, "WEEK AHEAD", theme_fg(),
+                                  UI_HEADER_Y, hdr_icon, icon_draw_calendar);
+
+    // Uniform day / high / low column widths across the sampled days.
+    int day_w = 0, hi_w = 0, lo_w = 0;
+    char b[12];
+    for (int i = 0; i < n_days; ++i) {
+      GSize ds = graphics_text_layout_get_content_size(d->days_label[i], rf,
+          GRect(0, 0, W, 30), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+      if (ds.w > day_w) day_w = ds.w;
+      snprintf(b, sizeof(b), "%d°", d->days_high[i]);
+      GSize hs = graphics_text_layout_get_content_size(b, rf,
+          GRect(0, 0, W, 30), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+      if (hs.w > hi_w) hi_w = hs.w;
+      snprintf(b, sizeof(b), "%d°", d->days_low[i]);
+      GSize ls = graphics_text_layout_get_content_size(b, rf,
+          GRect(0, 0, W, 30), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+      if (ls.w > lo_w) lo_w = ls.w;
+    }
+    int gap = 8, ag = 3, group_gap = 12;
+    int icon_col = row_icon ? (row_icon + gap) : 0;
+    int cluster_w = day_w + gap + icon_col + arrow + ag + hi_w + group_gap + arrow + ag + lo_w;
+    int cluster_x = bounds.origin.x + (W - cluster_w) / 2;
+    int floor_x = bounds.origin.x + UI_MARGIN_X;
+    if (cluster_x < floor_x) cluster_x = floor_x;
+    int th = row_h - 2;
+    for (int i = 0; i < n_days; ++i) {
+      int row_y = top_y + i * row_h;
+      int cy = row_y + th / 2 - 2;
+      int x = cluster_x;
+      graphics_context_set_text_color(ctx, theme_fg());
+      graphics_draw_text(ctx, d->days_label[i], rf,
+          GRect(x, row_y, day_w + 4, th),
+          GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+      x += day_w + gap;
+      if (row_icon) {
+        icon_draw_condition(ctx, GPoint(x + row_icon / 2, cy), row_icon, d->days_cond[i]);
+        x += row_icon + gap;
+      }
+      icon_draw_arrow_up(ctx, GPoint(x + arrow / 2, cy), arrow, theme_fg());
+      x += arrow + ag;
+      snprintf(b, sizeof(b), "%d°", d->days_high[i]);
+      graphics_draw_text(ctx, b, rf, GRect(x, row_y, hi_w + 4, th),
+          GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+      x += hi_w + group_gap;
+      icon_draw_arrow_down(ctx, GPoint(x + arrow / 2, cy), arrow, theme_fg());
+      x += arrow + ag;
+      snprintf(b, sizeof(b), "%d°", d->days_low[i]);
+      graphics_draw_text(ctx, b, rf, GRect(x, row_y, lo_w + 4, th),
+          GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+    }
+    ui_draw_auto_banner(ctx, bounds, d->rain_alert_min, d->last_updated,
+                        anim_get_frame());
+    return;
+  }
+
   ui_draw_card_header_with_icon(ctx, bounds, "WEEK AHEAD",
                                 theme_fg(),
                                 UI_HEADER_Y, 18, icon_draw_calendar);
 
-  GFont row_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
-  GFont pop_font = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
+  // Small classes (144x168 / 180x180): 5 day-rows in the 18px header font
+  // overflow the bottom banner (the last 1-2 days were buried). Drop to the
+  // 14px bold label font and a 16px row height so all 5 fit; the top_y clamp
+  // below then floors the block just under the header (Phase 5.2). Large
+  // classes keep verbatim values -> emery/gabbro byte-identical.
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  GFont row_font = ui_font_label();
+#else
+  GFont row_font = ui_font_header();
+#endif
+  GFont pop_font = ui_font_label();
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  int icon_size = 14;
+#else
   int icon_size = 16;
+#endif
   int gap = 6;
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  int row_h = 16;
+#else
   int row_h = PBL_IF_ROUND_ELSE(28, 26);
+#endif
 
   // Vertically center the block of rows in the region between the bottom of
   // the "WEEK AHEAD" header ink and the top of the "UPDATED" pill. The header
@@ -121,7 +216,11 @@ void card_week_draw(GContext *ctx, GRect bounds) {
 
   for (int i = 0; i < DAY_COUNT; ++i) {
     int row_y = top_y + i * row_h;
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+    int center_y = row_y + 8;   // center icons on the shorter 14px small-class row
+#else
     int center_y = row_y + 11;
+#endif
 
     // Day label.
     graphics_context_set_text_color(ctx, theme_fg());

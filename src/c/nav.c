@@ -1,6 +1,7 @@
 #include "nav.h"
 #include "theme.h"
 #include "settings.h"
+#include "ui.h"
 
 static Card s_cards[NAV_MAX_CARDS];
 static bool s_enabled[NAV_MAX_CARDS];
@@ -165,7 +166,14 @@ void nav_init(Window *window) {
   // drawn for every card, so it stays unified across cards.
   // gabbro round 260x260 → y=229 (224 + 5, tracking the down-nudged layout).
   // emery 200x228 → y = h-14 (was h-16; +2 to track the 2px down-nudge).
+  // chalk small-round 180x180: the gabbro-tuned absolute 229 falls off the
+  // 180px screen (dots invisible), so anchor it relative to the bottom like
+  // rect does — h-14 = 166, which clears the small-round banner (ends ~162).
+#if defined(UI_SCREEN_SMALL_ROUND)
+  int indicator_y = rb.size.h - 14;
+#else
   int indicator_y = PBL_IF_ROUND_ELSE(229, rb.size.h - 14);
+#endif
   GRect ib = GRect(0, indicator_y, rb.size.w, 8);
   s_indicator_layer = layer_create(ib);
   layer_set_update_proc(s_indicator_layer, indicator_layer_update);
