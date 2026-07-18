@@ -89,8 +89,12 @@ async function expireOnce(kv, key, ttl) {
 }
 
 module.exports = async (req, res) => {
-  const secret = process.env.RADAR_SECRET;
-  if (secret && req.query.key !== secret) {
+  // Accept either the watch key (RADAR_SECRET) or the Mac key
+  // (RADAR_SECRET_MAC) so the Mac app is revocable independently of the watch
+  // bundle (api-contract.md §5/§8). With neither env var set, auth is off
+  // (local dev / forks), matching the original single-key behavior.
+  const allowedKeys = [process.env.RADAR_SECRET, process.env.RADAR_SECRET_MAC].filter(Boolean);
+  if (allowedKeys.length && !allowedKeys.includes(req.query.key)) {
     res.status(401).send('unauthorized');
     return;
   }
