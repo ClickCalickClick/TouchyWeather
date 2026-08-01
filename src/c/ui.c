@@ -2,7 +2,12 @@
 #include "theme.h"
 #include "icons.h"
 #include "settings.h"
+// ui_band_w(), for the status pill's chord clamp on chalk. Every declaration in
+// this header sits inside the same small-class guard the call sites do, so on
+// emery and gabbro it contributes no code and the translation unit is unmoved.
+#include "ui_layout.h"
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 
 // --- Font role accessors (Phase 3.1 Stage A + Phase 5 screen class + Stage B scale) ---
@@ -146,6 +151,45 @@ static void prv_format_ago(uint32_t when, char *out, size_t n) {
   else                          snprintf(out, n, "UPDATED %luD AGO", (unsigned long)(delta / 86400));
 }
 
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+// Shrink the pill's label until it fits the pill.
+//
+// Clamping banner_w (below) also shrinks its inner text box — to ~108px on
+// SMALL_RECT and ~104px on chalk, where the strings were written against
+// 118/128 — and Big Mode independently promotes ui_font_label() to
+// GOTHIC_18_BOLD, at which "UPDATED 59M AGO" measures far past either. The draw
+// call's GTextOverflowModeTrailingEllipsis would resolve that by eating the
+// tail, i.e. by deleting the number: "UPDATED 5…" is a pill that has lost the
+// one thing it exists to say.
+//
+// So drop words instead of characters, least informative first: " AGO" (the
+// tense is already carried by "UPDATED"), then the "UPDATED " prefix itself.
+// Measured at each step rather than switched on Big Mode, because the same
+// cascade then also covers the 14px path's marginal cases, three-digit deltas
+// and the RAIN wording — one policy instead of a second set of constants to
+// keep in sync with the first. This is the Phase-4 Hours cascade in miniature.
+static bool prv_pill_text_fits(const char *s, int inner_w) {
+  GSize sz = graphics_text_layout_get_content_size(
+      s, ui_font_label(), GRect(0, 0, 200, 40),
+      GTextOverflowModeFill, GTextAlignmentLeft);
+  return sz.w <= inner_w;
+}
+
+static void prv_fit_pill_text(char *buf, int inner_w) {
+  if (inner_w <= 0 || prv_pill_text_fits(buf, inner_w)) return;
+  char *ago = strstr(buf, " AGO");
+  if (ago) {
+    *ago = '\0';
+    if (prv_pill_text_fits(buf, inner_w)) return;
+  }
+  const char *prefix = "UPDATED ";
+  size_t plen = strlen(prefix);
+  if (strncmp(buf, prefix, plen) == 0) {
+    memmove(buf, buf + plen, strlen(buf + plen) + 1);
+  }
+}
+#endif
+
 bool ui_draw_status_banner(GContext *ctx, GRect bounds,
                            StatusBannerMode mode,
                            int minutes_to_rain,
@@ -170,6 +214,29 @@ bool ui_draw_status_banner(GContext *ctx, GRect bounds,
   bool big = settings_get_big_mode();
   int banner_h = big ? 28 : 22;
   int banner_w = PBL_IF_ROUND_ELSE(140, 130) + (big ? 20 : 0);
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  // The widths above are the large classes'. On the small ones they are wider
+  // than the screen can carry, in two different ways:
+  //
+  //   * SMALL_RECT: 130 on a 144px screen leaves 7px gutters against every
+  //     card's own 12px margin, so the pill reads as wider than the content it
+  //     belongs to (#70) — and in Big Mode 130+20 = 150 on 144 puts the origin
+  //     at x=-3 and cuts BOTH rounded ends flat against the screen edge (#71).
+  //   * SMALL_ROUND: 140 is a straight rect on a 180px circle. At the pill's
+  //     lower edge the chord is only ~108px, so ~16px spilled past the glass on
+  //     each side and the ends rendered flat (#18/#72).
+  //
+  // ui_band_w() answers both: the class inset on rect (144-24 = 120, which is
+  // exactly the card margin the pill was violating) and the inscribed chord on
+  // round. It is measured at the band's vertical CENTER, which is right here
+  // rather than merely convenient — the pill is a stadium, so its corners are
+  // pulled in by banner_h/2 and its widest ink is the middle row this measures.
+  {
+    int pill_y = bounds.origin.y + bounds.size.h - pad_bottom - banner_h;
+    int band = ui_band_w(bounds, pill_y, banner_h);
+    if (banner_w > band) banner_w = band;
+  }
+#endif
   GRect r = GRect(bounds.origin.x + (bounds.size.w - banner_w) / 2,
                   bounds.origin.y + bounds.size.h - pad_bottom - banner_h,
                   banner_w, banner_h);
@@ -210,6 +277,10 @@ bool ui_draw_status_banner(GContext *ctx, GRect bounds,
   } else {
     prv_format_ago(last_updated_secs, buf, sizeof(buf));
   }
+
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  prv_fit_pill_text(buf, r.size.w - 12);
+#endif
 
   graphics_context_set_text_color(ctx, txt_color);
   GRect tr = GRect(r.origin.x + 6, r.origin.y + 2, r.size.w - 12, banner_h - 2);

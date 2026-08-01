@@ -214,8 +214,20 @@ void card_radar_draw(GContext *ctx, GRect bounds) {
     // Round needs more clearance due to the larger bottom bezel. In Big Mode
     // it lifts further to sit just above the added status banner.
     GFont tiny = ui_font_caption();
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+    // The constants below were the last private model of where the pill sits
+    // (#75) — week.c's and advice.c's went in Phase 1, this one was missed
+    // because the card is carved out under 128KB and so never draws here to
+    // give the bug away. It is wrong: on SMALL_RECT `H - 35` = 133 puts the
+    // attribution 7px BELOW the pill's own top edge, i.e. underneath it.
+    // Derive it instead, so a card that is currently dark cannot come back
+    // wrong if radar is ever enabled on a small unit. 16px is the caption's
+    // line box; ui_content_bottom() already carries the 4px of air.
+    int foot_y = ui_content_bottom(bounds) - 16;
+#else
     int foot_y = big ? (H - PBL_IF_ROUND_ELSE(81, 66))
                      : (H - PBL_IF_ROUND_ELSE(51, 35));
+#endif
     prv_draw_centered_text(ctx, bounds, "RAINVIEWER",
                            tiny, theme_secondary(), foot_y);
   } else if (s_state == RADAR_LOADING) {

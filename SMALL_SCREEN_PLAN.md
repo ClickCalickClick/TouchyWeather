@@ -802,6 +802,42 @@ end of every phase; a non-zero pixel diff means revert.
 
 ---
 
+## D8 — The endgame: D7's Phase 7 splits into four *(supersedes the D7 table's row 7)*
+
+After Phase 6 the register held **37 open defects, and D7's single "Phase 7" row covered only
+about 21 of them.** The remainder had never been allocated to any phase at all:
+
+* the **shared-chrome group #69–#75**, which Phase 1 was supposed to close and demonstrably did
+  not — "Phase 3 as built" records #18 and #73 still open, and `radar.c` still holds private pill
+  constants against #75;
+* the **D6b group** (#26/#33/#84), deferred out of Phase 5 by design;
+* **#92** (refresh-sheet phrase overflow), found in Phase 0 and never scheduled;
+* four polish minors (#27, #29, #35, #86).
+
+Two calls were taken before starting. **D6b is in scope** — it is the last M-severity 1-bit group,
+and folding #80 (the Big-Mode hero icon) into the same `icons.c` pass means the file's 1-bit
+vocabulary is designed once rather than twice. **Four phases, one commit each**, matching the
+Phase 0–6 granularity: each has a distinct verification matrix, and a single 23-defect commit
+spanning seven files would not be reviewable.
+
+**Shared chrome goes first, and that ordering is load-bearing.** Night Sky's #50 ("72% LIT"
+bisected by the pill) is a *symptom* of #69, not an independent defect; the What's New and
+Precipitation work both sit against the same pill and dot geometry. Fixing the chrome first means
+those screens are laid out against final geometry instead of being solved twice.
+
+| phase | work | defects | risk |
+|---|---|---|---|
+| **7** | Shared chrome: pill chord-clamp + width, page-dot chord window, 1-bit dots, `radar.c` migration | #18 #69 #70 #71 #72 #73 #74 #75 | low code volume, **highest lock exposure** — all three files are compiled by the locked pair |
+| **8** | Screen sweep: What's New, Precipitation, Night Sky, refresh sheet, and the #44/#47/#48/#49 singles | #39 #41 #42 #43 #44 #47 #48 #49 #50 #51 #52 #53 #65 #66 #67 #68 #86 #92 | medium — four independent screens, three of which no phase has entered |
+| **9** | Big Mode on the small classes | #76 #77 #78 #79 | medium — a **runtime** branch that also runs on emery/gabbro, so every fix needs a compile-time small-class guard too (Part 0 rule 3) |
+| **10** | 1-bit iconography (D6b) + the polish tail | #26 #27 #29 #33 #35 #80 #84 | low — `PBL_BW` cannot reach the lock; iteration-heavy, not risk-heavy |
+
+Out of scope at the end of Phase 10, by decision rather than omission: **#63** (UV plotted against
+the temp buffer's night hours — platform-independent, would move the locked pair; file separately)
+and **#90** (edge-case data captures).
+
+---
+
 ## Phase 3 as built
 
 `main_card.c`'s normal-mode path is now split: the two small classes run a four-row
@@ -1181,3 +1217,126 @@ never cascade into a run of wrong-card or system-watchface captures.
 #63 (UV night hours — platform-independent, would move the locked pair). The knockout's interruption
 of the trend line is cosmetic and accepted. The Week sheet's condition icon is 34 px on rect / 26 on
 round, down from 42, which is the price of getting its POP row back.
+
+---
+
+## Phase 7 as built
+
+Shared chrome: `ui.c`, `nav.c`, `cards/radar.c`. All three are compiled by emery and gabbro, so this
+is the phase with the least code and the most lock exposure. Every edit is a guarded insert with the
+large branch preserved **verbatim** — `git diff` reports all three files as purely additive, zero
+deleted lines, which is the mechanical form of that guarantee. `lock_guard.py` green at all six
+clean builds, including the two instrumented ones.
+
+**Closed:** #18/#72 #70 #71 #73 #74 #75. **#69 is deliberately left open** — its last live symptom is
+Night Sky's "72% LIT" (#50), and it closes there in Phase 8.
+
+### The pill: one clamp closes four defects (#70, #71, #18/#72)
+
+`ui.c:172`'s `banner_w = PBL_IF_ROUND_ELSE(140, 130) + (big ? 20 : 0)` was completely unguarded —
+the large classes' widths applied to every screen. Clamping it to `ui_band_w()` fixes all four
+failures at once, because the helper already answers both classes' version of the question: the
+class inset on rect, the inscribed chord on round.
+
+Measured on the emulator, pill ink per row:
+
+| | before | after | min clearance |
+|---|---|---|---|
+| basalt normal | 130 wide, 7 px gutters | **120**, gutters exactly **12** | = `ui_margin_x()` |
+| basalt Big | 150 on a 144 px screen, origin **x = −3** | **120** | 12 px |
+| chalk normal | 140, ~16 px past the glass each side | **116** (100→116→100) | **3.8 px** to the chord |
+| chalk Big | 160 | **120** | inside |
+
+The taper is the evidence that matters: the pill now measures 100 px at its top row, 116 at its
+centre, 100 at its bottom, i.e. its rounded ends are **intact** rather than masked flat, which is
+exactly what #18 described losing. It also retroactively justifies `ui_band_w()`'s "measure at the
+band's vertical centre" rule (`ui_layout.h:57-61`) for a caller that is not text: a stadium's corners
+are pulled in by `banner_h/2`, which is the same direction the chord narrows, so the centre
+measurement is not merely convenient — the shape self-corrects at precisely the rows where measuring
+at the far edge would have been pessimistic.
+
+### The clamp shrinks the label, so the label had to become a cascade
+
+Narrowing the pill narrows its inner text box to 108 px (rect) / 104 px (chalk), and Big Mode
+independently promotes `ui_font_label()` to `GOTHIC_18_BOLD`. The draw call's
+`GTextOverflowModeTrailingEllipsis` would have resolved the overflow by eating the tail — deleting
+the number, which is the only part of the string that carries information.
+
+`prv_fit_pill_text()` drops words instead, least informative first (" AGO", then the "UPDATED "
+prefix), **measured at each step rather than switched on Big Mode**. Instrumented on live data:
+
+```
+P7PILL in='UPDATED 59M AGO' w=124 inner=108     <- Big Mode, GOTHIC_18_BOLD
+P7PILL out='UPDATED 59M' banner_w=120
+```
+
+124 into 108 on both basalt and chalk, resolved to "UPDATED 59M". The estimate going in was
+130–140 px; the real number is 124, and the cascade is indifferent to which was right. In normal
+mode the same string measures ~96 px and the cascade correctly never fires.
+
+### #74: theme_secondary() looked like the fix, measured as the bug
+
+The first attempt gave the inactive dots `theme_secondary()`, reasoning from D6's rule 1 — the rule
+that rescued the fog icon in Phase 5, where `theme_secondary()` quantizes to the foreground and
+`theme_muted()` quantizes to the background. It came back on diorite at **37 % coverage against the
+active dot's 93 %**: still a checkerboard, just a darker one. #74 would have shipped looking fixed.
+
+**That rule is about strokes. These dots are a fill, and a fill does not quantize at all — it
+dithers, whichever grey it is given.** Phase 5 recorded "does it dither?" as a fill-vs-stroke
+property; the sharper statement is:
+
+> Fill vs stroke decides **whether** an element dithers. Muted vs secondary only decides **which way
+> a stroke quantizes**. A fill that must not dither has to be a pure endpoint — `theme_fg()`.
+
+With `theme_fg()` both 1-bit platforms measure **75 % fill in both themes**, identical to the colour
+platforms, and active/inactive is carried by length (a 16 px bar against 4 px squares) — the same
+solid-vs-shape vocabulary as the AQ gauge and the Golden Hour chips. Note this is the second time a
+correct rule has been applied one level too broadly; both times only pixel measurement caught it.
+
+### #73: chalk cannot fit its own carousel, so the strip is windowed
+
+With the full carousel (11 cards once radar is carved out) the strip is 116 px, and it sits at
+y = 166 on a 180 px circle where `ui_band_w()` returns **66**. No gap tightening reaches that: at
+gap 3 / dot 3 it is still 86. The cascade therefore tightens the gap 6→4 and then shows a **window**
+of the strip centred on the active card — 7 slots at gap 4 = 64 px — with the outermost dot on any
+clipped side drawn at half size as a "more this way" cue. Verified at both window positions: card 0
+gives `[active][5 dots][half]`, card 5 gives `[half][2][active][2][half]`.
+
+**SMALL_RECT is untouched and provably so** — 116 into a 120 px band fits, the cascade never fires,
+and all 11 dots still draw. The window is a real loss of information and is confined to the one
+class that geometrically cannot avoid it.
+
+### radar.c (#75) — dormant, and wrong
+
+`radar.c:217-218` was the last private pill model. It is not merely inconsistent, it is incorrect:
+on SMALL_RECT `H - 35` = 133 places the attribution **7 px below the pill's own top edge**, i.e.
+underneath it. It never showed because the card is carved out under 128 KB (`TW_RADAR_SUPPORTED`,
+runtime-disabled in `settings.c:327-335`) and so never draws on a small unit — a dormant defect that
+a screenshot matrix structurally cannot find. Now derived from `ui_content_bottom()`; the `#else`
+keeps the shipped expression verbatim. The edit sits below `radar.c`'s two `APP_LOG` lines (117,
+148), so their baked-in `__LINE__` values do not move.
+
+### Verification, and a new capture trap
+
+Four platforms × both themes, plus a Big-Mode instrumented run and a six-card regression sweep
+(Advice / 6 Hours / Golden Hour on basalt and chalk) confirming nothing that consumes the pill's
+geometry moved. Fresh install per capture; every set asserted distinct via `md5 -q | sort -u`.
+
+**The theme toggle silently did nothing on the first attempt, and 8 of 8 distinct shots hid it.**
+`SELECT` on the **Main card** is a manual refresh (`TouchWeather.c:240-243`), not the theme toggle —
+the toggle only runs on *ordinary* cards, and card 0 is not one. Mean luminance was flat across the
+"toggled" pair (28.1 → 27.6) while the shots still differed, because the hero icon animates and the
+pill alternates on a 4 s cycle. Distinct-shot counting is necessary and **not sufficient**; the
+theme assertion has to be a luminance flip, which is what Phase 6 used and what caught this.
+**Toggle the theme from card 1, never card 0.** After navigating first, all four flipped
+(28→230, 23→183, 214→41, 214→41).
+
+One side proof worth keeping: after the instrumentation was reverted, basalt and chalk rebuilt
+**byte-identical to the pre-instrumentation build**, while only diorite and flint moved from the
+`theme_fg()` dot change — exactly the `PBL_BW` footprint that change should have, confirming both
+that the revert was complete and that the 1-bit guard reached nothing else.
+
+### Still open on shared chrome
+
+#69, by design, until Night Sky lands in Phase 8. The chalk window shows 7 of 11 cards; that is a
+deliberate trade against a 66 px band, not an unresolved defect.
