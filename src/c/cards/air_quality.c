@@ -13,12 +13,22 @@
 // for the gauge sweep and the hero number so the value's severity is
 // communicated by color even at a glance.
 static GColor aqi_category_color(int aqi) {
+#if defined(PBL_BW)
+  // 1-bit: every band hue quantizes by luminance, so the category fill and
+  // the theme_muted() track below reduced to the same 50% dither and the
+  // gauge conveyed nothing. Solid fg on the dithered track instead — the
+  // vocabulary the UV card already uses. The band is spelled out in words
+  // directly beneath, so the hue was never the only carrier.
+  (void)aqi;
+  return theme_fg();
+#else
   if (aqi <= 50)   return GColorIslamicGreen;       // GOOD
   if (aqi <= 100)  return theme_accent_orange();    // MODERATE (yellow)
   if (aqi <= 150)  return GColorOrange;             // UNHEALTHY FOR SENSITIVE
   if (aqi <= 200)  return GColorRed;                // UNHEALTHY
   if (aqi <= 300)  return GColorPurple;             // VERY UNHEALTHY
   return GColorDarkCandyAppleRed;                   // HAZARDOUS
+#endif
 }
 
 // Phase 10E.x: AQI → arc sweep mapping.
@@ -174,6 +184,12 @@ void card_air_quality_draw(GContext *ctx, GRect bounds) {
     else if (lvl == 3) { plabel = "POLLEN: MODERATE";  pcolor = theme_accent_orange(); }
     else if (lvl == 4) { plabel = "POLLEN: HIGH";      pcolor = GColorOrange; }
     else               { plabel = "POLLEN: VERY HIGH";    pcolor = GColorRed; }
+#if defined(PBL_BW)
+    // 1-bit: the level hues collapse together, and level 0's theme_secondary()
+    // dithers illegibly at this size. The label names the level in words, so
+    // draw it solid and let the text carry it.
+    pcolor = theme_fg();
+#endif
     graphics_context_set_text_color(ctx, pcolor);
     graphics_draw_text(ctx, plabel,
         // Small classes drop the badge to the caption font to fit.

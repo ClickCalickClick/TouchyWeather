@@ -1,4 +1,33 @@
 #include "icons.h"
+#include "theme.h"
+
+// Condition-icon palette. On 1-bit displays (diorite/flint) the hardcoded
+// accents quantize by luminance: ChromeYellow and VividCerulean both reduce
+// to white, so the sun/clear glyph and the rain drops disappear entirely on
+// the light theme, and the icon appears to move between themes. Remap to
+// theme-aware fg/muted there so every condition stays visible in both
+// themes. Color platforms keep the original constants.
+//
+// Fog is the one condition drawn from strokes alone, and a stroke does not
+// dither: theme_muted() quantizes to the *background* in both themes
+// (LightGray->white on light, DarkGray->black on dark), so sharing
+// ICON_CLOUD_COLOR erased the glyph entirely. theme_secondary() is the
+// inverse pair, so it quantizes to the foreground in both.
+#if defined(PBL_BW)
+#define ICON_SUN_COLOR   (theme_fg())
+#define ICON_CLOUD_COLOR (theme_muted())
+#define ICON_DROP_COLOR  (theme_fg())
+#define ICON_BOLT_COLOR  (theme_fg())
+#define ICON_STORM_CLOUD (theme_muted())
+#define ICON_FOG_COLOR   (theme_secondary())
+#else
+#define ICON_SUN_COLOR   GColorChromeYellow
+#define ICON_CLOUD_COLOR GColorLightGray
+#define ICON_DROP_COLOR  GColorVividCerulean
+#define ICON_BOLT_COLOR  GColorChromeYellow
+#define ICON_STORM_CLOUD GColorDarkGray
+#define ICON_FOG_COLOR   GColorLightGray
+#endif
 
 static void set_stroke(GContext *ctx, GColor color, int w) {
   graphics_context_set_stroke_color(ctx, color);
@@ -115,26 +144,26 @@ void icon_draw_condition(GContext *ctx, GPoint c, int size,
                          WeatherCondition cond) {
   switch (cond) {
     case COND_SUNNY:
-      icon_draw_sun(ctx, c, size, GColorChromeYellow); break;
+      icon_draw_sun(ctx, c, size, ICON_SUN_COLOR); break;
     case COND_PARTLY_CLOUDY: {
-      icon_draw_sun(ctx, GPoint(c.x - size/4, c.y - size/4), size*3/4, GColorChromeYellow);
-      icon_draw_cloud(ctx, GPoint(c.x + size/6, c.y + size/8), size*3/4, GColorLightGray);
+      icon_draw_sun(ctx, GPoint(c.x - size/4, c.y - size/4), size*3/4, ICON_SUN_COLOR);
+      icon_draw_cloud(ctx, GPoint(c.x + size/6, c.y + size/8), size*3/4, ICON_CLOUD_COLOR);
       break;
     }
     case COND_CLOUDY:
-      icon_draw_cloud(ctx, c, size, GColorLightGray); break;
+      icon_draw_cloud(ctx, c, size, ICON_CLOUD_COLOR); break;
     case COND_RAIN:
-      icon_draw_cloud_rain(ctx, c, size, GColorLightGray, GColorVividCerulean); break;
+      icon_draw_cloud_rain(ctx, c, size, ICON_CLOUD_COLOR, ICON_DROP_COLOR); break;
     case COND_SNOW:
-      icon_draw_cloud(ctx, GPoint(c.x, c.y - size/6), size*3/4, GColorLightGray);
-      icon_draw_snow(ctx, GPoint(c.x, c.y + size/4), size/2, GColorVividCerulean);
+      icon_draw_cloud(ctx, GPoint(c.x, c.y - size/6), size*3/4, ICON_CLOUD_COLOR);
+      icon_draw_snow(ctx, GPoint(c.x, c.y + size/4), size/2, ICON_DROP_COLOR);
       break;
     case COND_STORM:
-      icon_draw_cloud(ctx, GPoint(c.x, c.y - size/6), size*7/8, GColorDarkGray);
-      icon_draw_lightning(ctx, GPoint(c.x, c.y + size/4), size/2, GColorChromeYellow);
+      icon_draw_cloud(ctx, GPoint(c.x, c.y - size/6), size*7/8, ICON_STORM_CLOUD);
+      icon_draw_lightning(ctx, GPoint(c.x, c.y + size/4), size/2, ICON_BOLT_COLOR);
       break;
     case COND_FOG:
-      icon_draw_fog(ctx, c, size, GColorLightGray); break;
+      icon_draw_fog(ctx, c, size, ICON_FOG_COLOR); break;
   }
 }
 
@@ -436,30 +465,30 @@ void icon_draw_condition_animated(GContext *ctx, GPoint c, int size,
   int by = bob_y(frame, 2);
   switch (cond) {
     case COND_SUNNY:
-      icon_draw_sun_rotating(ctx, c, size, GColorChromeYellow, frame); break;
+      icon_draw_sun_rotating(ctx, c, size, ICON_SUN_COLOR, frame); break;
     case COND_PARTLY_CLOUDY: {
       icon_draw_sun_rotating(ctx, GPoint(c.x - size/4, c.y - size/4),
-                             size*3/4, GColorChromeYellow, frame);
+                             size*3/4, ICON_SUN_COLOR, frame);
       icon_draw_cloud(ctx, GPoint(c.x + size/6, c.y + size/8 + by),
-                      size*3/4, GColorLightGray);
+                      size*3/4, ICON_CLOUD_COLOR);
       break;
     }
     case COND_CLOUDY:
-      icon_draw_cloud(ctx, GPoint(c.x, c.y + by), size, GColorLightGray); break;
+      icon_draw_cloud(ctx, GPoint(c.x, c.y + by), size, ICON_CLOUD_COLOR); break;
     case COND_RAIN:
       icon_draw_cloud_rain_animated(ctx, c, size,
-                                    GColorLightGray, GColorVividCerulean, frame);
+                                    ICON_CLOUD_COLOR, ICON_DROP_COLOR, frame);
       break;
     case COND_SNOW:
       icon_draw_snow_animated(ctx, c, size,
-                              GColorLightGray, GColorVividCerulean, frame);
+                              ICON_CLOUD_COLOR, ICON_DROP_COLOR, frame);
       break;
     case COND_STORM:
       icon_draw_storm_animated(ctx, c, size,
-                               GColorDarkGray, GColorChromeYellow, frame);
+                               ICON_STORM_CLOUD, ICON_BOLT_COLOR, frame);
       break;
     case COND_FOG:
-      icon_draw_fog_animated(ctx, c, size, GColorLightGray, frame); break;
+      icon_draw_fog_animated(ctx, c, size, ICON_FOG_COLOR, frame); break;
   }
 }
 
