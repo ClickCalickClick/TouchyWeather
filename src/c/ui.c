@@ -111,6 +111,30 @@ int ui_header_y(void) {
 }
 int ui_header_height(void) { return 24; }  // uniform across all screen classes
 
+// --- Status-pill geometry (small classes only; see ui.h) ---
+//
+// Kept in lockstep with ui_draw_status_banner() below by construction: both
+// read the same pad_bottom table and the same Big-Mode banner height. If that
+// function's geometry changes, change it here too — a screenshot will show the
+// drift immediately as a gap or an overlap at the bottom of every card.
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+int ui_status_pill_top(GRect bounds) {
+#if defined(UI_SCREEN_SMALL_ROUND)
+  const int pad_bottom = 18;
+#else
+  const int pad_bottom = 20;
+#endif
+  const int banner_h = settings_get_big_mode() ? 28 : 22;
+  return bounds.origin.y + bounds.size.h - pad_bottom - banner_h;
+}
+
+int ui_content_bottom(GRect bounds) {
+  // 4 px of air so descenders and degree rings don't kiss the pill's edge —
+  // "61°" merging into the pill outline was a real Big-Mode defect.
+  return ui_status_pill_top(bounds) - 4;
+}
+#endif
+
 static void prv_format_ago(uint32_t when, char *out, size_t n) {
   if (!when) { snprintf(out, n, "UPDATED --"); return; }
   uint32_t now = (uint32_t)time(NULL);
@@ -160,8 +184,14 @@ bool ui_draw_status_banner(GContext *ctx, GRect bounds,
   GColor pill_bg = (mode == STATUS_BANNER_RAIN)
                    ? theme_accent_orange()
                    : theme_muted();
+  // The rain pill's text is black because the accent under it is normally
+  // chrome yellow. Big Mode breaks that assumption: its high-contrast policy
+  // collapses theme_accent_orange() to theme_fg(), so the pill becomes a solid
+  // fg block and black text disappears into it on the light theme (the whole
+  // "RAIN IN 30M" alert rendered as an empty slab for half of every toggle
+  // cycle). Invert with the pill there, exactly as the PBL_BW branch above.
   GColor txt_color = (mode == STATUS_BANNER_RAIN)
-                     ? GColorBlack
+                     ? (big ? theme_bg() : GColorBlack)
                      : theme_fg();
 #endif
 
