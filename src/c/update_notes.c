@@ -169,7 +169,16 @@ static void prv_load(Window *window) {
   s_head_y = s_sun_cy + SUN_SIZE / 2 + 4;
   s_head_h = hs.h;
   s_ver_y = s_head_y + s_head_h + 6;
-  int header_h = s_ver_y + 12;
+  // Reserve exactly the version divider's drawn box (prv_header_update paints
+  // it into `vs.h + 4` starting at s_ver_y). A flat +12 was ~8px short of
+  // GOTHIC_14_BOLD, leaving the glyph bottoms outside the header layer and
+  // inside the scroll viewport — which is added to root later and so paints
+  // over them. Invisible while the notes were short enough not to scroll;
+  // scrolled body text drew straight through the version once they weren't.
+  GSize vhs = graphics_text_layout_get_content_size(
+      "v" APP_VERSION_LABEL, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
+      GRect(0, 0, w, 20), GTextOverflowModeFill, GTextAlignmentCenter);
+  int header_h = s_ver_y + vhs.h + 4;
 #else
   s_sun_cy = UI_HEADER_Y + SUN_SIZE / 2;
   s_head_y = s_sun_cy + SUN_SIZE / 2 + 6;
