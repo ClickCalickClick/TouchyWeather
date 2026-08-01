@@ -17,6 +17,18 @@ var clayCustomFn = function(minified) {
   page.on(page.EVENTS.AFTER_BUILD, function() {
     var gate = page.getItemByMessageKey('PhoneManagesCards');
     if (!gate) return;
+    // Small-screen watches (D1): the on-watch card editor is compiled out
+    // there and the C side forces PhoneManagesCards on, so the phone is the
+    // only card manager. Pin + hide the gate and leave every gated item
+    // enabled. Unknown/null platform falls through to the stock gating, so
+    // the large-screen (emery/gabbro) behavior cannot change.
+    var info = page.meta && page.meta.activeWatchInfo;
+    var pf = (info && info.platform) || '';
+    if (pf === 'basalt' || pf === 'chalk' || pf === 'diorite' || pf === 'flint') {
+      gate.set(true);
+      gate.hide();
+      return;
+    }
     var gated = [
       'HideSettingsCard', 'CardOrder',
       'CardEnabledHours', 'CardEnabledWeek', 'CardEnabledPrecip',
@@ -346,7 +358,92 @@ function reverseGeocode(lat, lon, done) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// STORE-CAPTURE MODE — must be false in any shipped build.
+//
+// Replaces the live Open-Meteo fetch with one fixed payload so the store
+// screenshots show the same forecast on every platform and every card. Nothing
+// in src/c is involved: this only changes which numbers the watch is handed, so
+// what gets photographed is the real rendering. With the live fetch running,
+// its reply lands at an unpredictable moment and overwrites the capture data
+// mid-run. Radar is deliberately NOT stubbed — it keeps its real RainViewer
+// pipeline, and lastLat/lastLon are seeded here so it has somewhere to centre.
+var CAPTURE_MODE = false;
+var CAPTURE_LAT = 37.7749;
+var CAPTURE_LON = -122.4194;
+
+function capturePayload() {
+  var now = new Date();
+  var msg = {
+    Temp: 72, FeelsLike: 75, High: 84, Low: 61, Condition: 1,
+    Wind: 12, WindDir: 'NW', Humidity: 58, DewPoint: 55,
+    UV: 7, UVMax: 9, AQI: 42, PM25: 9, PM10: 17, O3: 31, NO2: 12,
+    PollenLevel: 2,
+    Sunrise: '6:14 AM', Sunset: '7:45 PM',
+    BlueAm: '5:45 AM', GoldAm: '6:14 AM',
+    GoldPm: '7:05 PM', BluePm: '7:45 PM',
+    LocationName: 'San Francisco',
+    RainAlertMinutes: -1,
+    Units: 0, UseDewPoint: 0, ShowLocation: 1,
+    LastUpdated: Math.floor(Date.now() / 1000)
+  };
+  // Precipitation card: now -> +4h
+  var pop = [10, 15, 35, 60, 55];
+  for (var i = 0; i < 5; i++) { msg['Precip' + i] = pop[i]; }
+
+  var temps = [74, 78, 81, 83, 80, 76];
+  var conds = [1, 1, 2, 3, 3, 2];
+  var pops = [10, 15, 35, 60, 55, 25];
+  var winds = [11, 12, 14, 16, 15, 13];
+  var wdirs = ['NW', 'NW', 'W', 'W', 'SW', 'SW'];
+  var amts = [0, 0, 2, 6, 4, 1];   // tenths of an inch
+  var uvs = [6, 7, 9, 8, 6, 4];
+  for (var h = 1; h <= 6; h++) {
+    var hr = (now.getHours() + h) % 24;
+    var ampm = hr >= 12 ? 'PM' : 'AM';
+    var h12 = hr % 12; if (h12 === 0) { h12 = 12; }
+    msg['Hour' + h + 'Label'] = h12 + ' ' + ampm;
+    msg['Hour' + h + 'Temp'] = temps[h - 1];
+    msg['Hour' + h + 'Cond'] = conds[h - 1];
+    msg['Hour' + h + 'Pop'] = pops[h - 1];
+    msg['Hour' + h + 'Wind'] = winds[h - 1];
+    msg['Hour' + h + 'WindDir'] = wdirs[h - 1];
+    msg['Hour' + h + 'Precip'] = amts[h - 1];
+    msg['Hour' + h + 'Uv'] = uvs[h - 1];
+  }
+
+  var names = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+  var highs = [84, 79, 73, 81, 86];
+  var lows = [61, 59, 57, 60, 63];
+  var dconds = [1, 3, 3, 0, 0];
+  var dpops = [20, 70, 65, 10, 5];
+  for (var dI = 0; dI < 5; dI++) {
+    msg['Day' + dI + 'Label'] = names[(now.getDay() + dI) % 7];
+    msg['Day' + dI + 'High'] = highs[dI];
+    msg['Day' + dI + 'Low'] = lows[dI];
+    msg['Day' + dI + 'Cond'] = dconds[dI];
+    msg['Day' + dI + 'Pop'] = dpops[dI];
+  }
+  msg.MoonPhase = 3;
+  msg.MoonIllum = 72;
+  msg.MoonName1 = 'WAXING';
+  msg.MoonName2 = 'GIBBOUS';
+  return msg;
+}
+
 function fetchWeather(lat, lon) {
+  if (CAPTURE_MODE) {
+    // Seed the radar's coordinates so its real pipeline still has a centre.
+    lastLat = CAPTURE_LAT;
+    lastLon = CAPTURE_LON;
+    Pebble.sendAppMessage(capturePayload(),
+      function() { console.log('capture payload sent'); fetchDone(); },
+      function(e) {
+        console.log('capture send fail: ' + JSON.stringify(e));
+        fetchDone();
+      });
+    return;
+  }
   lastLat = lat;
   lastLon = lon;
   trackPing(lat, lon); // anonymous once-per-day active-user ping (fire-and-forget)
@@ -618,6 +715,11 @@ function locateAndFetch() {
     return;
   }
   fetchStartedAt = Date.now();
+  if (CAPTURE_MODE) {
+    // Skip geolocation too — the emulator's fix is slow and irrelevant here.
+    fetchWeather(CAPTURE_LAT, CAPTURE_LON);
+    return;
+  }
   var override = localStorage.getItem('locationOverride');
   if (override) {
     var parts = override.split(',');
@@ -958,6 +1060,18 @@ var WATCH_CARD_STATE_KEYS = [
   'CardEnabledRadar', 'CardEnabledAdvice'
 ];
 
+// D1: the four small-screen platforms compile out the on-watch card editor
+// and force PhoneManagesCards on. Mirror that phone-side so the cached seed
+// can never open the Clay page with the card editor disabled.
+function isSmallScreenWatch() {
+  var info = null;
+  try {
+    info = Pebble.getActiveWatchInfo && Pebble.getActiveWatchInfo();
+  } catch (e) { info = null; }
+  var pf = (info && info.platform) || '';
+  return pf === 'basalt' || pf === 'chalk' || pf === 'diorite' || pf === 'flint';
+}
+
 function cacheWatchCardState(p) {
   var state = {};
   try {
@@ -970,6 +1084,7 @@ function cacheWatchCardState(p) {
     // Clay stores as a boolean (checkbox manipulator).
     state[k] = (k === 'CardOrder') ? String(p[k]) : !!p[k];
   }
+  if (isSmallScreenWatch()) state.PhoneManagesCards = true;
   localStorage.setItem('watchCardState', JSON.stringify(state));
   console.log('watch card state cached: ' + JSON.stringify(state));
 }
@@ -1075,6 +1190,9 @@ Pebble.addEventListener('webviewclosed', function(e) {
     if (dict.PhoneManagesCards !== undefined) {
       wcs.PhoneManagesCards = !!dict.PhoneManagesCards.value;
     }
+    // D1: on small-screen watches the gate is forced on watch-side; keep the
+    // cache in agreement so the CardEnabled*/CardOrder writes below apply.
+    if (isSmallScreenWatch()) wcs.PhoneManagesCards = true;
     if (dict.HideSettingsCard !== undefined) {
       wcs.HideSettingsCard = !!dict.HideSettingsCard.value;
     }

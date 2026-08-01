@@ -6,6 +6,7 @@
 #include "comm.h"
 #include "anim.h"
 #include "settings.h"
+#include "ui.h"
 #include "refresh_sheet.h"
 #include "detail_modal.h"
 #include "update_notes.h"
@@ -214,6 +215,14 @@ static void prv_select_click(ClickRecognizerRef r, void *ctx) {
     return;
   }
   if (strcmp(nav_current_name(), "Settings") == 0) {
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+    // D1 status card: SELECT is the theme escape hatch. Deliberately NOT
+    // gated by SelectTogglesTheme, so the watch always keeps one local
+    // control; the card's THEME row repaints as its own feedback.
+    theme_set(theme_get() == THEME_LIGHT ? THEME_DARK : THEME_LIGHT);
+    nav_redraw();
+    return;
+#else
     int cur = settings_cursor();
     ToggleId tid = SETTINGS_VIS_ID(cur);
     bool now = !settings_get_enabled(tid);
@@ -222,6 +231,7 @@ static void prv_select_click(ClickRecognizerRef r, void *ctx) {
     nav_redraw();
     comm_send_card_state();  // keep the phone's Clay seed in sync
     return;
+#endif
   }
   // Main card: manual weather refresh (Task 5.1). This is the only manual
   // refresh path button-only platforms have; on touch models it complements
@@ -283,24 +293,32 @@ static void prv_up_long(ClickRecognizerRef r, void *ctx) {
   (void)r; (void)ctx;
   if (detail_modal_is_active()) return;
   if (refresh_sheet_is_active()) return;
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  // D1: on-watch reorder compiled out — Clay owns card order on these classes.
+#else
   if (strcmp(nav_current_name(), "Settings") != 0) return;
   if (settings_move_up(settings_cursor())) {
     prv_sync_nav_traversal();
     nav_redraw();
     comm_send_card_state();  // debounced, so chained holds coalesce
   }
+#endif
 }
 
 static void prv_down_long(ClickRecognizerRef r, void *ctx) {
   (void)r; (void)ctx;
   if (detail_modal_is_active()) return;
   if (refresh_sheet_is_active()) return;
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  // D1: on-watch reorder compiled out — Clay owns card order on these classes.
+#else
   if (strcmp(nav_current_name(), "Settings") != 0) return;
   if (settings_move_down(settings_cursor())) {
     prv_sync_nav_traversal();
     nav_redraw();
     comm_send_card_state();  // debounced, so chained holds coalesce
   }
+#endif
 }
 
 // BACK: dismiss an open detail modal; otherwise exit the app. Single-click on
@@ -410,7 +428,11 @@ int main(void) {
   // Check if this is a background wakeup
   if (launch_reason() == APP_LAUNCH_WAKEUP) {
     // Background fetch mode - no UI, just fetch and exit
-    APP_LOG(APP_LOG_LEVEL_INFO, "Launched from wakeup");
+    // APP_LOG hand-expanded with the line argument pinned: __LINE__ here is
+    // baked into EVERY platform's binary, so an edit anywhere above main()
+    // would shift it and break the emery/gabbro byte lock (tools/lock_guard.py)
+    // even when nothing real changed. Same for the exit log below.
+    app_log(APP_LOG_LEVEL_INFO, __FILE_NAME__, 413, "Launched from wakeup");
 
     // Initialize weather data structure (required for cache writes)
     weather_data_init_mock();
@@ -433,7 +455,7 @@ int main(void) {
     // arrives or timeout fires (both call app_event_loop_exit()).
     app_event_loop();
 
-    APP_LOG(APP_LOG_LEVEL_INFO, "BG: Event loop exited");
+    app_log(APP_LOG_LEVEL_INFO, __FILE_NAME__, 436, "BG: Event loop exited");
     return 0;
   }
 
