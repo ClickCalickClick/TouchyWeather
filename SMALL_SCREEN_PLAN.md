@@ -827,10 +827,28 @@ those screens are laid out against final geometry instead of being solved twice.
 
 | phase | work | defects | risk |
 |---|---|---|---|
-| **7** | Shared chrome: pill chord-clamp + width, page-dot chord window, 1-bit dots, `radar.c` migration | #18 #69 #70 #71 #72 #73 #74 #75 | low code volume, **highest lock exposure** — all three files are compiled by the locked pair |
-| **8** | Screen sweep: What's New, Precipitation, Night Sky, refresh sheet, and the #44/#47/#48/#49 singles | #39 #41 #42 #43 #44 #47 #48 #49 #50 #51 #52 #53 #65 #66 #67 #68 #86 #92 | medium — four independent screens, three of which no phase has entered |
-| **9** | Big Mode on the small classes | #76 #77 #78 #79 | medium — a **runtime** branch that also runs on emery/gabbro, so every fix needs a compile-time small-class guard too (Part 0 rule 3) |
-| **10** | 1-bit iconography (D6b) + the polish tail | #26 #27 #29 #33 #35 #80 #84 | low — `PBL_BW` cannot reach the lock; iteration-heavy, not risk-heavy |
+| **7** ✅ | Shared chrome: pill chord-clamp + width, page-dot chord window, 1-bit dots, `radar.c` migration | #18 #69 #70 #71 #72 #73 #74 #75 | low code volume, **highest lock exposure** — all three files are compiled by the locked pair |
+| **8** ✅ | Screen sweep: What's New, Precipitation, Night Sky, refresh sheet, and the #44/#47/#48/#49 singles | #39 #41 #42 #43 #44 #47 #48 #49 #50 #51 #52 #53 #65 #66 #67 #68 #86 #92 | medium — four independent screens, three of which no phase has entered |
+| **9** ✅ | Big Mode on the small classes | #76 #77 #78 #79 | medium — a **runtime** branch that also runs on emery/gabbro, so every fix needs a compile-time small-class guard too (Part 0 rule 3) |
+| **10** ✅ | 1-bit iconography (D6b) + the polish tail | #26 #27 #29 #33 #35 #80 #84 | low — `PBL_BW` cannot reach the lock; iteration-heavy, not risk-heavy |
+
+**All four phases are complete** (`dd14e58`, `efeb525`, `0635485`, `d2076a5`), and the small-screen
+remediation is closed: every numbered defect in the register is either fixed, or measured and
+recorded as not reproducing, or explicitly out of scope. One defect was added along the way (#100,
+the Big-Mode hero icon at row 0) and closed in the same phase that found it.
+
+**What remains, by decision rather than omission:**
+
+* **#63** — UV plotted against the temp buffer's night hours. Platform-independent, so fixing it
+  moves emery and gabbro. Needs its own decision like #93's, and should be filed separately.
+* **#90** — no captures of long location names, 3-digit or negative temperatures on the small
+  classes. The cascades that would handle them (Hours, Week, the pill label) are measured policies
+  rather than constants, so they should hold; that is a prediction, not a verification.
+* **#27** — cosmetic, and font-intrinsic. Documented in "Phase 10 as built".
+* **The v2.0.0 release prep** (`package.json`, `README.md`, `CHANGELOG.md`, `screenshots/v2.0/`) is
+  still uncommitted, and **`screenshots/v2.0/` is now stale** — the pill, the page dots, What's New,
+  Precipitation, Night Sky and every 1-bit condition icon have changed appearance since it was
+  captured. Re-shoot before release.
 
 Out of scope at the end of Phase 10, by decision rather than omission: **#63** (UV plotted against
 the temp buffer's night hours — platform-independent, would move the locked pair; file separately)
