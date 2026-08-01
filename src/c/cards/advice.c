@@ -222,12 +222,33 @@ typedef struct {
 
 // ---- Phrase pools (~10 per tier). Practical-with-a-wink voice. ----
 
+// A phrase that needs a shorter wording on the two small screen classes.
+//
+// The quip box there is 120x68 (SMALL_RECT) — exactly three lines of 18B —
+// and prv_audit_phrases() flagged 28 phrases that wrapped to four and clipped
+// with no ellipsis and no continuation cue, which reads as a rendering fault
+// rather than as truncation (#23). Rather than shrink the type further, those
+// phrases get a tighter wording here. Both versions sit side by side so the
+// voice can be compared at a glance when either is edited.
+//
+// The large classes are LOCKED: PHRASE() must expand to the shipped string
+// byte-for-byte there, which is why this is a macro over two literals and not
+// a runtime pick. Re-run the audit after touching any phrase — install with
+// `pebble install --emulator basalt --logs` and open the card.
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+#define PHRASE(full, small) small
+#else
+#define PHRASE(full, small) full
+#endif
+
 static const char *const PHRASES_STORM[] = {
   "Storm overhead. Stay inside and off the roof.",
-  "Lightning is present. Reschedule outdoor plans.",
+  PHRASE("Lightning is present. Reschedule outdoor plans.",
+         "Lightning out. Reschedule outdoor plans."),
   "Sky's throwing a tantrum. Best to wait it out.",
   "Thunder's active. Good day to stay in with a book.",
-  "Active storm. Best to stay inside and wait it out.",
+  PHRASE("Active storm. Best to stay inside and wait it out.",
+         "Active storm. Stay in and wait it out."),
   "Cancel the picnic. The sky said no.",
   "Electrical storm active. Don't be a conductor.",
   "Heavy skies ahead. Find shelter soon.",
@@ -254,19 +275,27 @@ static const char *const PHRASES_RAIN_NOW[] = {
   "Slick streets. Slower steps.",
   "Wet phone risk: high. Pocket it safely.",
   "It's pouring. Best to keep warm and stay dry.",
-  "Rain mode engaged. Umbrellas are mandatory.",
+  // Short in characters is not the same as short in LINES: "Umbrellas" and
+  // "mandatory." are each ~10 chars against a ~13-char line, so they refuse
+  // to pair up and the phrase still wrapped to four. Shorter words, not just
+  // fewer of them.
+  PHRASE("Rain mode engaged. Umbrellas are mandatory.",
+         "Umbrella weather. No exceptions."),
   "Outside is wet. Inside is perfectly fine."
 };
 
 static const char *const PHRASES_RAIN_COLD[] = {
   "Cold rain active. Surfaces can turn slick fast.",
   "Near-freezing rain. Slow steps, better traction.",
-  "Cold drizzle outside. Keep feet warm and dry.",
-  "Wet plus cold today. Extra caution on sidewalks.",
+  PHRASE("Cold drizzle outside. Keep feet warm and dry.",
+         "Cold drizzle. Keep feet warm and dry."),
+  PHRASE("Wet plus cold today. Extra caution on sidewalks.",
+         "Wet plus cold. Caution on sidewalks."),
   "Chilly rain mode. Waterproof layers pay off.",
   "Cold rain and wind. Keep hands covered.",
   "Cold rain with an icy feel. Watch curbs.",
-  "Rain is cold enough to bite. Bundle and hood up.",
+  PHRASE("Rain is cold enough to bite. Bundle and hood up.",
+         "Rain cold enough to bite. Hood up."),
   "Cold wet outside. Prioritize grip over speed."
 };
 
@@ -279,7 +308,8 @@ static const char *const PHRASES_SNOW[] = {
   "Slush is the new ice. Step lighter.",
   "Hot drink mandatory. It's a snow day rule.",
   "Sky is quiet, ground is loud. Wear layers.",
-  "It's snowing. Roads may be slick, so take it slow."
+  PHRASE("It's snowing. Roads may be slick, so take it slow.",
+         "It's snowing. Roads may be slick.")
 };
 
 static const char *const PHRASES_HOT[] = {
@@ -302,7 +332,8 @@ static const char *const PHRASES_COLD[] = {
   "Winter said prove it. Wear heavy layers.",
   "Bone-cold outside. Hot bath waiting at home.",
   "Wind chill bites. Two pairs of socks is wisdom.",
-  "Frost on everything. Plan extra driving time.",
+  PHRASE("Frost on everything. Plan extra driving time.",
+         "Frost on everything. Allow drive time."),
   "Keep hands warm and take your time outside."
 };
 
@@ -312,7 +343,8 @@ static const char *const PHRASES_WIND[] = {
   "Hair plans? Canceled. Lean into the wind.",
   "Strong gusts today. Keep your balance outdoors.",
   "Door-slam day. Hold the handle tightly.",
-  "Wind makes mild cold feel completely arctic.",
+  PHRASE("Wind makes mild cold feel completely arctic.",
+         "Wind makes mild cold feel arctic."),
   "Trash bag flight risk. Secure all outdoor items.",
   "Watch the trees. They'll tell on the wind.",
   "Crosswinds bite. Drive slower on highways."
@@ -322,17 +354,20 @@ static const char *const PHRASES_HIGH_UV[] = {
   "Sunscreen isn't optional. Bright burn risk today.",
   "UV is very high today. Cover up well.",
   "Sun is judging. So is your sensitive skin.",
-  "Strong sun today. Strong shade preference required.",
+  PHRASE("Strong sun today. Strong shade preference required.",
+         "Strong sun. Strong shade preference."),
   "Reapply your sunscreen often today.",
   "UV index severe. Burns happen in 15 minutes.",
   "Hat over hood. Wide brim always wins here.",
-  "Shade will be limited. Plan outdoor time carefully.",
+  PHRASE("Shade will be limited. Plan outdoor time carefully.",
+         "Shade is limited. Plan outdoor time."),
   "Sunglasses help today. They're more than style."
 };
 
 static const char *const PHRASES_BAD_AIR[] = {
   "Poor air today. Indoor exercise is the better call.",
-  "Lungs prefer indoors today. Keep windows fully shut.",
+  PHRASE("Lungs prefer indoors today. Keep windows fully shut.",
+         "Lungs prefer indoors. Keep windows shut."),
   "Air feels thick. Trust the AQI gauge.",
   "Mask up if sensitive. Today's a stay-in day.",
   "Outdoor workout gently postponed. Do not push it.",
@@ -343,15 +378,19 @@ static const char *const PHRASES_BAD_AIR[] = {
 };
 
 static const char *const PHRASES_MUGGY[] = {
-  "Very humid today. Expect a sticky walk outside.",
-  "Sticky conditions. Shower-after-walking territory.",
+  PHRASE("Very humid today. Expect a sticky walk outside.",
+         "Very humid. Expect a sticky walk."),
+  PHRASE("Sticky conditions. Shower-after-walking territory.",
+         "Sticky out. Shower-after-walking day."),
   "Air is thick today. Move slow and hydrate.",
   "Humidity says hi. Very, very loudly.",
   "Towel in the bag. Always carry one today.",
   "Light, breathable clothes will feel better today.",
   "Humidity is high. Expect hair and clothes to cling.",
-  "Tropical conditions. Without the actual beach.",
-  "It feels heavier than the temperature suggests."
+  PHRASE("Tropical conditions. Without the actual beach.",
+         "Tropical. Without the actual beach."),
+  PHRASE("It feels heavier than the temperature suggests.",
+         "Feels heavier than the temp suggests.")
 };
 
 static const char *const PHRASES_PLEASANT_DAY[] = {
@@ -360,24 +399,30 @@ static const char *const PHRASES_PLEASANT_DAY[] = {
   "Everything feels nicely balanced today. Enjoy it.",
   "If you head out, conditions are on your side.",
   "All systems fully go. Step boldly outside.",
-  "Friendly sky above. Go be friendly right back.",
-  "Picnic-grade conditions. Grab your basket and run.",
-  "The kind of day weather apps totally brag about.",
+  PHRASE("Friendly sky above. Go be friendly right back.",
+         "Friendly sky. Go be friendly back."),
+  PHRASE("Picnic-grade conditions. Grab your basket and run.",
+         "Picnic-grade day. Grab your basket."),
+  PHRASE("The kind of day weather apps totally brag about.",
+         "The kind of day apps brag about."),
   "No weather blockers in sight. Plans are a go."
 };
 
 // Night-safe pleasant set. Keep these neutral and avoid "go outside now"
 // directives that can be wrong late at night.
 static const char *const PHRASES_PLEASANT_NIGHT[] = {
-  "Clear and quiet outside. Good night to wind down.",
-  "Calm skies overhead. The evening looks settled.",
+  PHRASE("Clear and quiet outside. Good night to wind down.",
+         "Clear and quiet. Good night to unwind."),
+  PHRASE("Calm skies overhead. The evening looks settled.",
+         "Calm skies. The evening looks settled."),
   "Night is steady and dry. Low drama weather.",
   "Quiet conditions. A restful evening fits well.",
   "Stable night weather. Nothing urgent outside.",
   "Skies are calm. A cozy plan wins tonight.",
   "Clear late hours. No weather chaos in sight.",
   "Evening air is settled. Keep plans low-stress.",
-  "Night forecast is calm. Choose what feels comfortable."
+  PHRASE("Night forecast is calm. Choose what feels comfortable.",
+         "Night is calm. Choose what feels good.")
 };
 
 // Daytime but cool-safe pleasant set. Encourages layers instead of implying
@@ -396,14 +441,20 @@ static const char *const PHRASES_PLEASANT_COOL[] = {
 
 static const char *const PHRASES_DATA_STALE[] = {
   "Forecast is aging out. Pull down to refresh.",
-  "This snapshot may be stale. Grab a fresh update.",
+  PHRASE("This snapshot may be stale. Grab a fresh update.",
+         "Snapshot may be stale. Grab an update."),
   "Data is older than ideal. Refresh before planning.",
-  "Weather feed may be behind. Quick refresh recommended.",
-  "Advisory confidence is reduced. Update for accuracy.",
-  "Conditions may have shifted. Refresh for an update.",
-  "This weather update is old. Refresh for the latest.",
+  PHRASE("Weather feed may be behind. Quick refresh recommended.",
+         "Feed may be behind. Quick refresh."),
+  PHRASE("Advisory confidence is reduced. Update for accuracy.",
+         "Confidence is reduced. Update it."),
+  PHRASE("Conditions may have shifted. Refresh for an update.",
+         "Conditions may have shifted. Refresh."),
+  PHRASE("This weather update is old. Refresh for the latest.",
+         "This update is old. Refresh it."),
   "This reading may be stale. Pull to refresh.",
-  "Forecast is getting old. Refresh for confidence."
+  PHRASE("Forecast is getting old. Refresh for confidence.",
+         "Forecast is getting old. Refresh.")
 };
 
 #define POOL(arr) (arr), (sizeof(arr) / sizeof((arr)[0]))
@@ -424,6 +475,7 @@ static const AdviceTierDef TIERS[ADV_TIER_COUNT] = {
 };
 
 #undef POOL
+#undef PHRASE
 
 // One-shot audit: on first draw of this card we measure every phrase
 // against the actual body rect on the live platform and log a warning
@@ -581,7 +633,14 @@ static const char *const *prv_phrase_pool_for_tier(const WeatherData *d,
 }
 
 static void prv_audit_phrases(GRect body_r) {
+  // Measure in the font the quip is actually DRAWN in, or the audit means
+  // nothing (#21): the small classes render the quip at 18B, and auditing 24B
+  // against an 18B box both flags phrases that fit and passes ones that clip.
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  GFont f = ui_font_header();
+#else
   GFont f = ui_font_body();
+#endif
   for (int t = 0; t < ADV_TIER_COUNT; ++t) {
     const AdviceTierDef *def = &TIERS[t];
     for (int i = 0; i < def->phrase_count; ++i) {
@@ -590,7 +649,12 @@ static void prv_audit_phrases(GRect body_r) {
           GRect(0, 0, body_r.size.w, 500),
           GTextOverflowModeWordWrap, GTextAlignmentCenter);
       if (s.h > body_r.size.h) {
-        APP_LOG(APP_LOG_LEVEL_WARNING,
+        // APP_LOG hand-expanded with the line argument pinned, as
+        // TouchWeather.c:435 does: __LINE__ is baked into EVERY platform's
+        // binary, so editing the phrase pools above would shift it and break
+        // the emery/gabbro byte lock (tools/lock_guard.py) even though nothing
+        // real changed. Per-screen-class phrase variants make that routine.
+        app_log(APP_LOG_LEVEL_WARNING, __FILE_NAME__, 593,
                 "[advice] OVERFLOW tier=%d idx=%d h=%d>max=%d: \"%s\"",
                 t, i, s.h, body_r.size.h, def->phrases[i]);
       }
@@ -617,7 +681,8 @@ static void prv_audit_phrases(GRect body_r) {
           GRect(0, 0, body_r.size.w, 500),
           GTextOverflowModeWordWrap, GTextAlignmentCenter);
       if (sz.h > body_r.size.h) {
-        APP_LOG(APP_LOG_LEVEL_WARNING,
+        // Line pinned for the same reason as the call above.
+        app_log(APP_LOG_LEVEL_WARNING, __FILE_NAME__, 620,
                 "[advice] OVERFLOW pleasant_set=%d idx=%d h=%d>max=%d: \"%s\"",
                 s, i, sz.h, body_r.size.h, pleasant_sets[s][i]);
       }
@@ -749,11 +814,24 @@ static void prv_generate_tier_headline(AdviceTier tier, const WeatherData *d,
       snprintf(buf, buf_size, "STORM OVERHEAD");
       break;
     case ADV_RAIN_SOON:
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+      // Small classes draw this headline at 14B beside a 16px tier icon, so
+      // the text budget is ~100px (~14 chars). The handful of headlines that
+      // run past that get a shorter wording here rather than an ellipsis —
+      // this row is the DATA, so truncating it is not an option. The large
+      // classes are locked and keep the full strings verbatim.
+      snprintf(buf, buf_size, "RAIN IN %dM", d->rain_alert_min);
+#else
       snprintf(buf, buf_size, "RAIN IN %d MINS", d->rain_alert_min);
+#endif
       break;
     case ADV_RAIN_NOW:
       if (prv_is_freezingish_rain(d)) {
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+        snprintf(buf, buf_size, "COLD RAIN %d\xc2\xb0", temp);
+#else
         snprintf(buf, buf_size, "COLD RAIN / %d\xc2\xb0", temp);
+#endif
       } else {
         snprintf(buf, buf_size, "RAINING / %d\xc2\xb0", temp);
       }
@@ -762,10 +840,20 @@ static void prv_generate_tier_headline(AdviceTier tier, const WeatherData *d,
       snprintf(buf, buf_size, "SNOWING / %d\xc2\xb0", temp);
       break;
     case ADV_HOT:
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+      // Matches the main card's own "FEELS 75°" label, and leaves room for a
+      // three-digit reading.
+      snprintf(buf, buf_size, "FEELS %d\xc2\xb0", feels_like);
+#else
       snprintf(buf, buf_size, "FEELS LIKE %d\xc2\xb0", feels_like);
+#endif
       break;
     case ADV_COLD:
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+      snprintf(buf, buf_size, "FEELS %d\xc2\xb0", feels_like);
+#else
       snprintf(buf, buf_size, "FEELS LIKE %d\xc2\xb0", feels_like);
+#endif
       break;
     case ADV_WIND:
       if (d->units == UNITS_METRIC) {
@@ -781,13 +869,21 @@ static void prv_generate_tier_headline(AdviceTier tier, const WeatherData *d,
                d->uv_max > 0 ? d->uv_max : d->uv);
       break;
     case ADV_BAD_AIR:
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+      snprintf(buf, buf_size, "AQI %d POOR", d->aqi);
+#else
       snprintf(buf, buf_size, "AQI: %d (POOR)", d->aqi);
+#endif
       break;
     case ADV_MUGGY:
       snprintf(buf, buf_size, "%d%% HUMIDITY", d->humidity);
       break;
     case ADV_DATA_STALE:
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+      snprintf(buf, buf_size, "DATA IS STALE");
+#else
       snprintf(buf, buf_size, "DATA MAY BE STALE");
+#endif
       break;
     case ADV_PLEASANT:
     default:
@@ -865,6 +961,15 @@ void card_advice_draw(GContext *ctx, GRect bounds) {
     return;
   }
 
+  // Small classes: the standalone tier badge is GONE — it and the headline
+  // cost 48px of a 100px band for ~4 words (#22), which is what squeezed the
+  // quip down to 24px on SMALL_RECT and 2px on chalk (#19, #20). The badge
+  // merges into the headline row below instead: the tier ICON prepends the
+  // accent-coloured data headline, which already states the same trigger.
+  // (Merging into the CARD HEADER, as Part 4's Call 5 proposed, does not fit:
+  // "TOUCH & GO · RAIN SOON" measures ~185px at 18B against 120px usable, and
+  // the header alone is already ~123px.)
+#if !defined(UI_SCREEN_SMALL_RECT) && !defined(UI_SCREEN_SMALL_ROUND)
   // Tier badge (icon + tier name) — small, right under the header.
   int badge_y = header_y + UI_HEADER_HEIGHT + PBL_IF_ROUND_ELSE(8, 4);
   GFont badge_font = ui_font_label();
@@ -881,6 +986,7 @@ void card_advice_draw(GContext *ctx, GRect bounds) {
   graphics_draw_text(ctx, def->label, badge_font,
       GRect(badge_x + badge_icon + badge_gap, badge_y, bsize.w + 4, 20),
       GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+#endif
 
   // Body phrase. Pick stable-per-refresh: seed by last_updated so the
   // same line shows for the entire session and refreshes when weather
@@ -897,6 +1003,54 @@ void card_advice_draw(GContext *ctx, GRect bounds) {
   int idx = (int)(seed % (uint32_t)phrase_count);
   const char *phrase = phrase_pool[idx];
 
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  // Small-class layout — two rows instead of three:
+  //   ┌────────────────────────────┐
+  //   │  ☀ FEELS LIKE 97°  ← accent, icon + 14B, one row   │
+  //   │  Hydrate or wilt.  ← fg, 18B, the WHOLE rest       │
+  //   │  It is cooking.      of the band down to the pill  │
+  //   └────────────────────────────┘
+  // The headline drops to 14B (the badge's own font — this row IS the merged
+  // badge) so the full data string fits beside the icon in 120px instead of
+  // ellipsizing, and so the 18B quip clearly outranks it: the quip is the
+  // card's content, the headline is the supporting "why".
+  //
+  // The quip's bottom comes from the shared accessor, not this file's private
+  // PBL_IF_ROUND_ELSE(70, 56) guess (R2/#75) — that guess is why the quip box
+  // was 24px on SMALL_RECT and 2px on chalk. It is now ~68px / ~66px = three
+  // full lines at 18B on both, and prv_audit_phrases() below is measured
+  // against that real box, so no phrase can silently clip (#21, #23).
+  int ox = bounds.origin.x;
+  char headline_buf[32];
+  prv_generate_tier_headline(tier, d, headline_buf, sizeof(headline_buf));
+
+  int head_y = header_y + UI_HEADER_HEIGHT + 2;
+  int head_h = 18;
+  int head_icon = 16;
+  int head_gap = 4;
+  GFont head_font = ui_font_label();
+  GSize hsize = graphics_text_layout_get_content_size(headline_buf, head_font,
+      GRect(0, 0, W, head_h), GTextOverflowModeTrailingEllipsis,
+      GTextAlignmentLeft);
+  int head_total = head_icon + head_gap + hsize.w;
+  int head_x = ox + (W - head_total) / 2;
+  int head_floor = ox + UI_MARGIN_X;
+  if (head_x < head_floor) head_x = head_floor;
+  prv_draw_tier_icon(ctx, GPoint(head_x + head_icon / 2, head_y + head_h / 2),
+                     head_icon, accent, tier);
+  graphics_context_set_text_color(ctx, accent);
+  graphics_draw_text(ctx, headline_buf, head_font,
+      GRect(head_x + head_icon + head_gap, head_y, hsize.w + 4, head_h),
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+
+  int quip_top = head_y + head_h + 2;
+  GRect quip_r = GRect(ox + UI_MARGIN_X, quip_top, W - 2 * UI_MARGIN_X,
+                       ui_content_bottom(bounds) - quip_top);
+  if (!s_audited) { prv_audit_phrases(quip_r); s_audited = true; }
+  graphics_context_set_text_color(ctx, theme_fg());
+  graphics_draw_text(ctx, phrase, ui_font_header(),
+      quip_r, GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
+#else
   // Two-Tone layout:
   //   ┌──────────────────────────────────┐
   //   │  headline  ← accent color, 18pt  │  ~20px
@@ -931,6 +1085,7 @@ void card_advice_draw(GContext *ctx, GRect bounds) {
   graphics_draw_text(ctx, phrase,
       ui_font_body(),
       quip_r, GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
+#endif
 
   // Standard auto status banner so this card stays consistent with peers.
   ui_draw_auto_banner(ctx, bounds, d->rain_alert_min, d->last_updated,

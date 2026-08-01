@@ -153,9 +153,19 @@ void card_week_draw(GContext *ctx, GRect bounds) {
   // bottom) is (DAY_COUNT-1)*row_h + 11, so we offset by those to center the
   // *ink* rather than the layout boxes.
   int header_ink_bottom = UI_HEADER_Y + 18;
+  // Phase 4 carry-over (#34): the small classes take the pill's real geometry
+  // from the shared accessor instead of this file's private guess, which was
+  // 22px wrong on chalk (it believed the pill top was 118 when it is 140, so
+  // the "centre the block" maths below centred against the wrong region). The
+  // large classes are locked, so they keep the wrong-but-shipped expression
+  // verbatim and never call the accessor. See ui.h.
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  int pill_top = ui_status_pill_top(bounds);
+#else
   int banner_pad_bottom = PBL_IF_ROUND_ELSE(40, 22);
   int banner_h = 22;
   int pill_top = bounds.size.h - banner_pad_bottom - banner_h;
+#endif
   int region_center = (header_ink_bottom + pill_top) / 2;
   int block_ink_h = (DAY_COUNT - 1) * row_h + 11;
   int row_ink_offset = PBL_IF_ROUND_ELSE(5, 4);
@@ -210,6 +220,36 @@ void card_week_draw(GContext *ctx, GRect bounds) {
   int cluster_w = day_max.w + gap + icon_size + gap +
                   low_max.w + 4 + sep.w + 4 + high_max.w +
                   (any_pop ? (gap + pop_col_w) : 0);
+
+#if defined(UI_SCREEN_SMALL_RECT)
+  // D3 — drop the pop% column, KEEP the condition icon.
+  //
+  // The full row measures ~159px against 120px usable, and the old left-only
+  // clamp let the overflow run off the right edge: "70%" rendered as "7(" and
+  // "65%" as "6!" (#31). D2's "keep precip" does not map here, because on this
+  // card the overflowing column IS the precip column — so the two goals are in
+  // direct conflict and the tie goes to the icon: rain probability already has
+  // a dedicated card two swipes away, while the condition icon is the only
+  // at-a-glance signal in a Week row.
+  //
+  // Measured, not hardcoded, for the same reason as hours.c. Chalk fits
+  // everything and is deliberately excluded.
+  const int usable = W - 2 * UI_MARGIN_X;
+  if (any_pop && cluster_w > usable) {
+    any_pop = false;        // the draw loop's own `any_pop` gate collapses it
+    pop_col_w = 0;
+    cluster_w = day_max.w + gap + icon_size + gap +
+                low_max.w + 4 + sep.w + 4 + high_max.w;
+  }
+  // Backstop for pathological data (sub-zero lows widen every temp column).
+  if (cluster_w > usable) {
+    gap = 4;
+    cluster_w = day_max.w + gap + icon_size + gap +
+                low_max.w + 4 + sep.w + 4 + high_max.w +
+                (any_pop ? (gap + pop_col_w) : 0);
+  }
+#endif
+
   int cluster_x = bounds.origin.x + (W - cluster_w) / 2;
   int floor_x = bounds.origin.x + UI_MARGIN_X;
   if (cluster_x < floor_x) cluster_x = floor_x;

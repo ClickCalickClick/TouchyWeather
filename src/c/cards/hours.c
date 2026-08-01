@@ -52,6 +52,20 @@ static bool fmt_precip(const WeatherData *d, int i, char *buf, size_t n) {
   return true;
 }
 
+#if defined(UI_SCREEN_SMALL_RECT)
+// Drops the leading "0" from an imperial precip amount ("0.2\"" -> ".2\"") —
+// step 4 of the D2 cascade below, and the last few pixels it can find before
+// it has to drop the column outright. Metric ("3mm") is already minimal and is
+// left alone. Hand-rolled rather than using <string.h> so the include itself
+// stays out of the locked platforms' translation unit.
+static void prv_shorten_precip(char *buf) {
+  if (buf[0] != '0' || buf[1] != '.') return;
+  int i = 0;
+  while (buf[i + 1]) { buf[i] = buf[i + 1]; ++i; }
+  buf[i] = '\0';
+}
+#endif
+
 void card_hours_draw(GContext *ctx, GRect bounds) {
   WeatherData *d = weather_data_get();
   int W = bounds.size.w;
@@ -201,6 +215,68 @@ void card_hours_draw(GContext *ctx, GRect bounds) {
   int cluster_w = time_max.w + gap + icon_size + gap + temp_max.w +
                   gap + wind_col_w +
                   (any_precip ? (gap + precip_col_w) : 0);
+
+#if defined(UI_SCREEN_SMALL_RECT)
+  // D2 — the measured column cascade.
+  //
+  // The five-column cluster measures ~156px at the widest data against 120px
+  // usable here, and the old code centred it and clamped LEFT only, so the
+  // overflow simply ran off the right edge: every precip amount rendered as
+  // "0." with the digits gone (#24) and the widest rows lost the last digit of
+  // the wind speed too (#25). That is R3, and this replaces it.
+  //
+  // The decision (D2) is to keep precip and drop WIND. Dropping wind alone
+  // only recovers 33px and still leaves ~3px of overflow, so steps 3 and 4 are
+  // load-bearing rather than optional — together they find ~9px more, which is
+  // what lets precip actually survive at every data width measured. Step 5
+  // exists so the card can never clip, not because it is expected to fire.
+  //
+  // It re-measures after every step instead of hardcoding a column set, so it
+  // stays right for long labels, three-digit temps and metric/imperial
+  // switches. Chalk has 140px usable, fits all five columns, and is deliberately
+  // NOT part of this branch (#30).
+  bool show_wind = true;
+  bool precip_short = false;
+  const int usable = W - 2 * UI_MARGIN_X;
+#define HOURS_REMEASURE() do {                                       \
+    wind_col_w   = arrow_icon + ctx_text_gap + wind_text_w;          \
+    precip_col_w = drop_icon + ctx_text_gap + precip_text_w;         \
+    cluster_w = time_max.w + gap + icon_size + gap + temp_max.w +    \
+                (show_wind  ? (gap + wind_col_w)   : 0) +            \
+                (any_precip ? (gap + precip_col_w) : 0);             \
+  } while (0)
+
+  // 1. drop the wind column (compass arrow + speed)
+  if (cluster_w > usable) { show_wind = false; HOURS_REMEASURE(); }
+  // 2. tighten the inter-column gap and the icon
+  if (cluster_w > usable) { gap = 3; icon_size = 13; HOURS_REMEASURE(); }
+  // 3. shorten the imperial precip format ("0.2\"" -> ".2\"")
+  if (cluster_w > usable && d->units != UNITS_METRIC) {
+    precip_short = true;
+    precip_text_w = 0;
+    for (int i = 0; i < 6; ++i) {
+      if (fmt_precip(d, i, pbuf, sizeof(pbuf))) {
+        prv_shorten_precip(pbuf);
+        GSize prs = graphics_text_layout_get_content_size(pbuf, pop_font,
+            GRect(0,0,W,30), GTextOverflowModeTrailingEllipsis,
+            GTextAlignmentLeft);
+        if (prs.w > precip_text_w) precip_text_w = prs.w;
+      }
+    }
+    HOURS_REMEASURE();
+  }
+  // 4. last resort — drop precip as well, so the row can never clip
+  if (cluster_w > usable) { any_precip = false; HOURS_REMEASURE(); }
+  // Whatever the cascade dropped, take wind back if it now fits: a dry window
+  // never needed to lose it in the first place.
+  if (!show_wind) {
+    show_wind = true;
+    HOURS_REMEASURE();
+    if (cluster_w > usable) { show_wind = false; HOURS_REMEASURE(); }
+  }
+#undef HOURS_REMEASURE
+#endif
+
   int cluster_x = bounds.origin.x + (W - cluster_w) / 2;
   int floor_x = bounds.origin.x + UI_MARGIN_X;
   if (cluster_x < floor_x) cluster_x = floor_x;
@@ -229,8 +305,13 @@ void card_hours_draw(GContext *ctx, GRect bounds) {
         GRect(temp_x, row_y - 2, temp_max.w + 4, 22),
         GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
 
-    // Wind (always): compass arrow (direction) + speed.
+    // Wind: compass arrow (direction) + speed. Always drawn except where the
+    // D2 cascade above dropped the column. The brace is split across the guard
+    // so the draw statements themselves stay verbatim for the locked classes.
     int wind_x = temp_x + temp_max.w + gap;
+#if defined(UI_SCREEN_SMALL_RECT)
+    if (show_wind) {
+#endif
     fmt_wind(d, i, wbuf, sizeof(wbuf));
     icon_draw_compass_arrow(ctx,
         GPoint(wind_x + arrow_icon/2, icon_cy),
@@ -239,10 +320,17 @@ void card_hours_draw(GContext *ctx, GRect bounds) {
     graphics_draw_text(ctx, wbuf, pop_font,
         GRect(wind_x + arrow_icon + ctx_text_gap, row_y, wind_text_w + 4, 18),
         GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+#if defined(UI_SCREEN_SMALL_RECT)
+    }
+#endif
 
     // Precip (only on wet hours): droplet + amount.
     if (any_precip && fmt_precip(d, i, pbuf, sizeof(pbuf))) {
       int precip_x = wind_x + wind_col_w + gap;
+#if defined(UI_SCREEN_SMALL_RECT)
+      if (!show_wind) precip_x = wind_x;   // precip takes the dropped slot
+      if (precip_short) prv_shorten_precip(pbuf);
+#endif
       icon_draw_droplet(ctx,
           GPoint(precip_x + drop_icon/2, icon_cy),
           drop_icon, theme_accent_blue());
