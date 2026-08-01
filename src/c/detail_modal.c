@@ -651,9 +651,16 @@ static void prv_draw_uv(GContext *ctx) {
   // Mark WHEN the curve peaks (#64). The temp trend annotates its extremes and
   // this one annotated nothing, so the curve gave a shape with no scale. Only
   // the max is worth a label — a UV minimum is almost always 0.
-  // NOTE: the hours this is plotted against are the temp buffer's and are wrong
-  // (#63, platform-independent and deferred); this labels the value, not a claim
-  // about the time, and gains its full meaning once #63 lands.
+  // NOTE (was #63, does NOT reproduce — traced end to end 2026-08-01): an
+  // earlier revision of this comment claimed the hours here were the temp
+  // buffer's and wrong. They are not. Label, temp and UV travel the same index
+  // at all three links: PKJS writes Hour{n}Label/Temp/Uv from one `idx =
+  // startIdx + hi` in a single loop (index.js), comm.c fills hours_label[i] /
+  // hours_temp[i] / hours_uv[i] from those keys in a single loop, and
+  // prv_draw_axis_labels() draws hours_label[0]/[3]/[5] at px[0]/px[3]/px[5] —
+  // the very x positions hours_uv[0]/[3]/[5] are plotted at. An instrumented
+  // run logged labels=[18,19,20,21,22,23] uv=[2,2,1,0,0,0] and rendered exactly
+  // as sent. The label below is a claim about BOTH the value and its hour.
   for (int i = 0; i < 6; i++) {
     if (d->hours_uv[i] != umax) continue;
     prv_draw_point_value(ctx, umax, px[i], py[i], y,

@@ -1194,6 +1194,8 @@ visible on the 1-bit captures; the value is legible, which it was not before.
 
 #64 is implemented as a max-only annotation (a UV minimum is almost always 0). Its **value** is
 correct; the **hour** it sits above is not, until #63 lands.
+[**Corrected 2026-08-01:** the hour is correct too. #63 does not reproduce — see *#63 does not
+reproduce* at the end of this document. The annotation was always a claim about both.]
 
 ### The 1-bit sweep was larger than #62, and I introduced one regression fixing it
 
@@ -1232,8 +1234,9 @@ never cascade into a run of wrong-card or system-watchface captures.
 
 ### Still open on these sheets
 
-#63 (UV night hours — platform-independent, would move the locked pair). The knockout's interruption
-of the trend line is cosmetic and accepted. The Week sheet's condition icon is 34 px on rect / 26 on
+~~#63 (UV night hours — platform-independent, would move the locked pair).~~ [**Corrected
+2026-08-01:** #63 does not reproduce; nothing was open here. See the end of this document.] The
+knockout's interruption of the trend line is cosmetic and accepted. The Week sheet's condition icon is 34 px on rect / 26 on
 round, down from 42, which is the price of getting its POP row back.
 
 ---
@@ -1659,3 +1662,89 @@ diorite in both themes on live data (theme flip asserted by mean luminance 206 �
 discs, disc-plus-cloud and hollow clouds as three distinct row glyphs, and the Week card rendering
 four different conditions unambiguously. Hero scale verified separately with pinned conditions.
 Colour platforms are untouched by construction — every edit is inside `PBL_BW`.
+
+---
+
+## #63 does not reproduce — traced end to end, 2026-08-01
+
+The last numbered defect carried past Phase 10. It was deferred five times (Calls 12, the Phase 5–6
+and Phase 8 "still open" notes, and the Phase 10 close-out) on the strength of a single register
+sentence — *"UV detail plots against the temp buffer's night hours"* — and never once measured. It
+is wrong. **Label, temperature and UV travel the same index at all three links in the chain:**
+
+| link | file | what it does |
+|---|---|---|
+| producer | `src/pkjs/index.js` ~583–607 | one `for (hi = 1..6)` loop over a single `idx = startIdx + hi`; `Hour{hi}Label`, `Hour{hi}Temp` and `Hour{hi}Uv` are all written from that one `idx` |
+| transport | `src/c/comm.c` ~357–386 | one `for (i = 0..5)` loop; `hours_label[i]`, `hours_temp[i]`, `hours_uv[i]` filled from `Hour{i+1}Label/Temp/Uv` |
+| consumer | `src/c/detail_modal.c` `prv_draw_axis_labels()` | draws `hours_label[0]/[3]/[5]` at `px[0]/px[3]/px[5]` — the exact x positions `hours_uv[0]/[3]/[5]` are plotted at |
+
+There is no separate "temp buffer" hour axis in the app. There is one hour axis, shared. An
+instrumented run logged `labels=[18,19,20,21,22,23] uv=[2,2,1,0,0,0]` and the sheet rendered exactly
+that.
+
+**Where the phantom came from.** `pebble emu-set-time` moves the *watch* clock but not PKJS —
+pypkjs's `new Date()` follows the host. Setting the watch forward against a cached payload makes
+correctly-paired data look mis-paired, because the labels are honest about a time the watch no
+longer thinks it is. That is an artefact of the harness, not of the app.
+
+**Fixed:** the comment at `detail_modal.c` that asserted those hours "are wrong" now records the
+trace. It was the last place in the tree still repeating the claim, and it is worth noting *how* it
+survived: it did not restate the register from memory, it cited the register **as evidence**, and a
+citation of an unverified claim reads exactly like a verified one six weeks later.
+
+**#63 is closed as not-reproducing.** That makes **ten** register entries that did not survive
+measurement — #16 #27 #29 #35 #47 #50 #63 #68 #77, plus #94's mis-stated cause. The rule earned in
+Phase 10 now has its cleanest example: *measure the current build before changing code to match a
+register entry* — and its corollary, **a deferral is not a diagnosis.** Every one of the five times
+#63 was carried forward, carrying it was cheaper than checking it; checking it took twenty minutes.
+
+---
+
+## #90 closed — the edge-case captures now exist, 2026-08-01
+
+The last open **verification** gap (as opposed to defect): no capture existed of the small classes
+carrying a long location name, a 3-digit temperature, or a negative one. The Hours/Week/pill
+cascades are measured policies rather than constants, so they *should* absorb these — but Phase 10's
+own lesson is that a prediction is not a measurement.
+
+**Method.** A `STRESS_90` block in `weather_data.c`, stamping the forced values in
+`weather_data_get()` so it overrides live PKJS data on every read, guarded to
+`UI_SCREEN_SMALL_RECT || UI_SCREEN_SMALL_ROUND`. Two variants — hot (`temp 108`, `feels 115`,
+`hi/lo 112/99`, hours 100–105, week 105–109) and cold (`temp -12`, `feels -23`, `hi/lo -5/-31`,
+hours -10…-15, week -15…-31) — each with a 28-char location, `"Llanfairpwllgwyngyllgogerych"`.
+12 captures: {hot, cold} × {Main, 6 Hours, Week} × {basalt, chalk}, all asserted distinct.
+
+**Result: every cascade held. No overflow, no clipping, no collision on either geometry.**
+
+| surface | behaviour under stress |
+|---|---|
+| Main location row | ellipsizes — `Llanfairpwllgwyn…` on rect, `Llanfairpwllg…` on **round**, i.e. the round chord is respected rather than the rect width reused |
+| Main hero + hi/lo | `108°` / `↑112° ↓99°` and `-12°` / `↑-5° ↓-31°` both fit; `FEELS 115°` / `FEELS -23°` fit |
+| 6 Hours temp column | 3-digit and negative temps fit; the wind/precip column drops per-row as needed |
+| Week high/low | fits both signs on both geometries |
+| Week POP column | **drops on rect, survives on round** — the 144 px screen spends its width on the wider temps, the 180 px one does not have to. The column-drop policy engaging exactly as designed |
+| pill | `UPDATED 12M AGO` on rect; on **round** the two-digit minute count drops the word to `UPDATED 11M`. The pill's own label cascade, engaging on the narrower chord |
+
+Two of those — the round-specific location truncation and the round-specific pill shortening — are
+behaviours no rect capture could have shown, which is the whole argument for #90 existing.
+
+### A trap worth more than the result: a guard can compile to nothing
+
+The first stress build changed **no hashes at all**. `weather_data.c` includes only
+`weather_data.h` and `<string.h>`, so `UI_SCREEN_SMALL_RECT` was *not defined in that translation
+unit* and `#if defined(UI_SCREEN_SMALL_RECT) || ...` was quietly false everywhere. The block
+compiled to nothing on every platform and the build was green.
+
+Nothing about that failure is visible in the source, in the build log, or in a screenshot — the
+screenshot just shows the ordinary card, which is precisely what a "the guard is working" result
+looks like. It was caught only because `lock_guard.py` prints the four unlocked hashes and they were
+byte-identical to the previous build. **A platform guard is only as good as the include that defines
+its macro, and the only cheap proof that a guarded edit compiled in is that the hash of a platform
+it targets actually moved.**
+
+This inverts the usual use of the tool: the guard normally proves emery/gabbro did **not** move.
+Here the same output proved basalt/chalk/diorite **did**. Both directions are worth asserting.
+
+**Revert proven by hash**, not by inspection: after `git checkout -- src/c/weather_data.c` and a
+clean rebuild, all four unlocked hashes returned to their exact pre-stress values
+(`c95aa1bf5613e157`, `faa4f2d8b3b67f02`, `1486e14ed7c79bc7`, `0154eae89b390c7a`).

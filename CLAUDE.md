@@ -133,3 +133,80 @@ pebble emu-button click up --repeat 3 --interval 100
 ## AI Code Review Guidelines
 
 - Once you think you've fulfilled the user's request, ask yourself if you see any issues with the current screenshot, and if there are any differences between the screenshot and the reference image or the user's description. If so, fix them.
+## Emulator Traps
+
+Each of these cost a real debugging run. They are about this project's toolchain, not about any
+one feature, so they stay here permanently.
+
+* **`pebble install` needs 12–14 SECONDS to relaunch and render.** At `sleep 2`–`sleep 5` the
+  screenshot catches the *previous* state. Use `sleep 18`. This has produced whole capture sets of
+  a stale card.
+* **Assert distinctness on EVERY capture set** — `md5` the shots and check the unique count equals
+  the shot count, including sets that "obviously" differ. It is the only check that has ever caught
+  a stale-capture run. Write the assertion in Python, not shell: a shell `N=$(ls $SET | wc -l)`
+  where `$SET` fails to word-split yields `N=0 unique=0`, which "passes" vacuously.
+* **A guarded edit can compile to nothing.** `#if defined(UI_SCREEN_SMALL_RECT)` in a file that
+  does not include `ui.h` is silently false — green build, no warning, no visible change. The only
+  cheap proof a guarded edit compiled in is that `tools/lock_guard.py`'s hash for a platform it
+  targets actually **moved**. Use the guard in both directions: locked pair unchanged, target
+  platform changed.
+* **The first `down` press after an install is usually swallowed** while the app settles. Verify
+  which card you are on by looking at the screenshot, never by counting presses.
+* **Theme toggles from card 1+, never card 0** — SELECT on the Main card is a manual refresh
+  ([TouchWeather.c:240-243](src/c/TouchWeather.c#L240-L243)), not the theme toggle. Assert a flip by
+  MEAN LUMINANCE, not by distinctness: a failed toggle still yields distinct shots.
+* **There is a 15-minute data freshness gate.** Reinstalls log `skipping fetch` and re-render the
+  persisted cache. Force a real fetch with SELECT on the Main card.
+* **`pebble emu-set-time` moves the WATCH clock but not PKJS** — pypkjs `new Date()` follows the
+  host. A forced watch clock against a cached payload fabricates defects that do not exist; this is
+  what made defect #63 look real for five phases.
+* **The emulator's weather is for a field in central Germany — not your location.** pypkjs 2.0.7
+  implements `navigator.geolocation` by fetching the host's public IP from ipify and resolving it
+  through a **bundled `GeoLiteCity.dat`** (MaxMind GeoLite City, discontinued 2018). A modern IP
+  returns a country-level-only record, so it yields the country centroid — for DE that is
+  **51.0, 9.0**. Confirmed 2026-08-01: the API at those coords matched a live capture exactly
+  (71°F, feels 66, hi/lo 74/59, wind 7mph N). Consequences: every live-data screenshot in this repo
+  shows German weather; a card can look empty (0% POP all day there) while your real location is
+  rainy; and it is *not* the `37.7749,-122.4194` San Francisco fallback at `index.js`, which only
+  fires when the lookup raises. **To capture real local data, set the Clay "Location override"
+  (`lat,lon`, stored as `localStorage.locationOverride`) — the app reads it before geolocation.**
+  Do not confuse this with `CAPTURE_MODE`, which serves a fully synthetic payload.
+* **PKJS edits need `pebble build` to ship.** Editing `src/pkjs/*.js` alone does nothing.
+* `pebble emu-button --repeat N` silently drops presses — use single `click` calls in a shell loop.
+* `emu-button click back` EXITS the watchapp unless a modal is open.
+* `pebble wipe` recovers a wedged emulator but resets persisted state, which RE-ARMS the What's New
+  modal — the next launch is the notes screen, not card 0.
+* Detail sheets open with a long press: `click select --duration 800`.
+* No `timeout` command on macOS. No ImageMagick; PIL is available, and contact sheets are the
+  fastest way to review a set.
+* A `cd` inside a compound shell command persists to later commands. Use absolute paths.
+
+Carousel order: Main(0) Touch&Go(1) 6 Hours(2) Week(3) Precipitation(4) UV(5) Air Quality(6)
+Sun Cycle(7) Night Sky(8) Golden Hour(9) Settings(10). Radar is registered but runtime-disabled.
+
+## Rendering Rules (earned, not theoretical)
+
+* **Fill vs stroke decides WHETHER something dithers on 1-bit; muted vs secondary only decides
+  which way a STROKE quantizes.** A fill that must not dither has to be a pure endpoint
+  (`theme_fg()`). Getting this backwards shipped a "fixed" page-dot row still at 37% dither.
+* **Dithering is a tool as often as a bug.** The Night Sky moon needs it as a THIRD tone — three
+  regions must be distinct and 1-bit has two colours.
+* **When a defect is in a duplicated helper, grep for the twin.** Three occurrences (#99, #43, #80).
+  It is a rule, not an anecdote.
+* **Reserve INK height, not the font's layout box** — but note a font's layout WIDTH exceeds its
+  ink (side bearings), which is what ellipsized "Now" in a box its ink fit.
+* **Measure the current build before changing code to match a defect report.** Ten register entries
+  did not survive measurement (#16 #27 #29 #35 #47 #50 #63 #68 #77, plus #94's stated cause). A
+  report written from old screenshots describes the app that was. **A deferral is not a diagnosis.**
+
+## The emery/gabbro Lock
+
+`emery` and `gabbro` are frozen. Any change must leave them byte-identical.
+
+* Safe axes only: `UI_SCREEN_SMALL_RECT`, `UI_SCREEN_SMALL_ROUND`, `PBL_BW`.
+* Never edit an `#else`/`LARGE_*` branch — add a branch **above** it and keep the large expression
+  verbatim, character for character.
+* Every build: `pebble clean && pebble build` (clean is mandatory), then `python3
+  tools/lock_guard.py`, which must exit 0.
+* `tools/lock_baseline.txt` was deliberately re-baselined 2026-07-31 for defect #93. It is correct —
+  do not "restore" it.
