@@ -1,5 +1,8 @@
 #include "icons.h"
 #include "theme.h"
+// Screen-class macros for the header-glyph tuning below. ui.h is declarations
+// and macros only, so the locked pair compiles no new code from this include.
+#include "ui.h"
 
 // Condition-icon palette. On 1-bit displays (diorite/flint) the hardcoded
 // accents quantize by luminance: ChromeYellow and VividCerulean both reduce
@@ -289,6 +292,36 @@ static void draw_half_sun_with_rays(GContext *ctx, GPoint c, int size, GColor co
                           GPoint(c.x + d_out, c.y - d_out));
 }
 
+#if defined(PBL_BW)
+// #49 — on 1-bit the arrow carries 100% of the sunrise/sunset distinction.
+//
+// The two glyphs share draw_half_sun_with_rays() and differ only by which end
+// of a short stem gets a chevron whose arms are a hardcoded 3px at stroke 2.
+// On a colour screen that is fine because the sun itself is orange vs blue; on
+// diorite and flint both collapse to theme_fg() and the entire difference
+// between "sunrise" and "sunset" is six pixels pointing one way or the other.
+//
+// A filled triangle head that scales with the glyph reads at a glance where a
+// chevron does not, and it is the same fill-vs-stroke reasoning as the rest of
+// the 1-bit work: a solid shape survives where a thin stroke has to be hunted
+// for. PBL_BW cannot reach emery or gabbro, so the colour glyphs are untouched.
+static void prv_arrow_head(GContext *ctx, GPoint tip, int size, bool up,
+                           GColor color) {
+  int half = size / 4;
+  if (half < 3) half = 3;
+  int dy = up ? half : -half;
+  static GPoint tp[3];
+  tp[0] = tip;
+  tp[1] = GPoint(tip.x - half, tip.y + dy);
+  tp[2] = GPoint(tip.x + half, tip.y + dy);
+  GPathInfo pi = { 3, tp };
+  GPath *g = gpath_create(&pi);
+  graphics_context_set_fill_color(ctx, color);
+  gpath_draw_filled(ctx, g);
+  gpath_destroy(g);
+}
+#endif
+
 void icon_draw_sunrise(GContext *ctx, GPoint c, int size, GColor color) {
   draw_half_sun_with_rays(ctx, c, size, color);
   // Up-arrow under the horizon, centered.
@@ -297,9 +330,13 @@ void icon_draw_sunrise(GContext *ctx, GPoint c, int size, GColor color) {
   int top_y = c.y + 4;
   int bot_y = c.y + 4 + size/3;
   graphics_draw_line(ctx, GPoint(ax, top_y), GPoint(ax, bot_y));
+#if defined(PBL_BW)
+  prv_arrow_head(ctx, GPoint(ax, top_y), size, true, color);
+#else
   // chevron at top pointing up
   graphics_draw_line(ctx, GPoint(ax, top_y), GPoint(ax - 3, top_y + 3));
   graphics_draw_line(ctx, GPoint(ax, top_y), GPoint(ax + 3, top_y + 3));
+#endif
 }
 
 void icon_draw_sunset(GContext *ctx, GPoint c, int size, GColor color) {
@@ -310,15 +347,35 @@ void icon_draw_sunset(GContext *ctx, GPoint c, int size, GColor color) {
   int top_y = c.y + 4;
   int bot_y = c.y + 4 + size/3;
   graphics_draw_line(ctx, GPoint(ax, top_y), GPoint(ax, bot_y));
+#if defined(PBL_BW)
+  prv_arrow_head(ctx, GPoint(ax, bot_y), size, false, color);
+#else
   // chevron at bottom pointing down
   graphics_draw_line(ctx, GPoint(ax, bot_y), GPoint(ax - 3, bot_y - 3));
   graphics_draw_line(ctx, GPoint(ax, bot_y), GPoint(ax + 3, bot_y - 3));
+#endif
 }
 
 void icon_draw_pulse(GContext *ctx, GPoint c, int size, GColor color) {
   set_stroke(ctx, color, 2);
   int w = size;
   int x = c.x - w/2;
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  // #48 — at the header's 18px the shipped trace has THREE excursions
+  // (down, up, down) crammed into ~12px of width, and they merge into a single
+  // angular wedge that reads as a jet or an arrowhead rather than a heartbeat.
+  // One dip and one tall spike, with real flat baseline on both sides, is what
+  // makes an ECG legible at this size. Large classes keep the original trace.
+  GPoint pts[] = {
+    { x,             c.y },
+    { x + w/3,       c.y },
+    { x + w/3 + 2,   c.y + size/5 },
+    { x + w/2,       c.y - size/2 },
+    { x + w/2 + 3,   c.y },
+    { x + 2*w/3,     c.y },
+    { x + w,         c.y },
+  };
+#else
   GPoint pts[] = {
     { x,         c.y },
     { x + w/6,   c.y },
@@ -328,6 +385,7 @@ void icon_draw_pulse(GContext *ctx, GPoint c, int size, GColor color) {
     { x + 2*w/3, c.y },
     { x + w,     c.y },
   };
+#endif
   for (size_t i = 0; i + 1 < sizeof(pts)/sizeof(pts[0]); ++i) {
     graphics_draw_line(ctx, pts[i], pts[i+1]);
   }

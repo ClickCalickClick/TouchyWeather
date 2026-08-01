@@ -6,6 +6,17 @@
 #include "../anim.h"
 #include "../weather_data.h"
 
+// #86 — the card's two dotted separators are drawn by ui_draw_dotted_hline(),
+// i.e. graphics_draw_pixel: a STROKE, which cannot dither. theme_muted() is the
+// background colour on a 1-bit panel in both themes, so both separators drew
+// nothing at all. These were the last two such sites left in cards/ after the
+// detail sheet's nine (#98) and the fog icon (#95).
+#if defined(PBL_BW)
+#define SC_MUTED_INK theme_secondary()
+#else
+#define SC_MUTED_INK theme_muted()
+#endif
+
 // Returns the x at which the (icon + gap + text) cluster's left edge
 // should sit so the cluster is horizontally centered within `bounds`.
 // `UI_MARGIN_X` is enforced as a minimum safe inset.
@@ -58,7 +69,7 @@ void card_sun_cycle_draw(GContext *ctx, GRect bounds) {
         GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
     ui_draw_dotted_hline(ctx, bounds.origin.x + UI_MARGIN_X + 6,
                          bounds.origin.x + W - UI_MARGIN_X - 6,
-                         top_row_y + row_h - 4, theme_muted());
+                         top_row_y + row_h - 4, SC_MUTED_INK);
     // Sunset row.
     GSize sss = graphics_text_layout_get_content_size(d->sunset, tf,
         GRect(0, 0, W, 40), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
@@ -116,7 +127,7 @@ void card_sun_cycle_draw(GContext *ctx, GRect bounds) {
   // Dotted separator between rows (symmetric to UI_MARGIN_X).
   ui_draw_dotted_hline(ctx, bounds.origin.x + UI_MARGIN_X + 6,
                        bounds.origin.x + W - UI_MARGIN_X - 6,
-                       top_row_y + row_h - 4, theme_muted());
+                       top_row_y + row_h - 4, SC_MUTED_INK);
 
   // --- Sunset row ---
   GSize ss_size = graphics_text_layout_get_content_size(d->sunset, time_font,

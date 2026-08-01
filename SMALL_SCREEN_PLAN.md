@@ -1340,3 +1340,145 @@ that the revert was complete and that the 1-bit guard reached nothing else.
 
 #69, by design, until Night Sky lands in Phase 8. The chalk window shows 7 of 11 cards; that is a
 deliberate trade against a 66 px band, not an unresolved defect.
+
+---
+
+## Phase 8 as built
+
+The screen sweep: `night_sky.c`, `precipitation.c`, `update_notes.c`, `refresh_sheet.c`, plus the
+`uv.c` / `air_quality.c` / `sun_cycle.c` / `icons.c` singles. Three of these files no phase had ever
+entered — they were still 100 % `PBL_IF_ROUND_ELSE`, i.e. running the large classes' numbers.
+`lock_guard.py` green at all fourteen clean builds, including four instrumented ones.
+
+**Closed:** #39 #41 #42 #43 #44 #47 #48 #49 #50 #51 #52 #53 #65 #66 #67 #86 #92, and **#69** with
+Night Sky, which was its last live symptom. **#68 does not reproduce** (below).
+
+### Night Sky (#50–#53) — and #52 needed a third colour, not a bigger one
+
+The card cascaded four rows downward from the header with fixed offsets and never looked at where
+the stack ended. Replaced with a `ui_layout_solve()` stack against the real `ui_content_bottom()`.
+Measured on basalt, before → after: gaps between the sky disc, the two name rows and the "% LIT"
+row go from **1 / 5 / 7 px to an even 3 / 3 / 4**, and clearance above the pill from 2 px to 9.
+
+**#50 is another #16 — it was no longer clipping.** Phase 1's pill nudge (rect −2, round −5) had
+already bought it back, leaving the illum ink 2 px clear on basalt and **1 px** on chalk. It read
+clean and was one font metric from not. The register's wording ("bisected by the pill") described
+a state that no longer existed; solving the stack converts luck into structure.
+
+**#52 cost two attempts and the first one made the card worse.** Phase 5's diagnosis said the sky
+had to become "a field the moon sits ON rather than a rim it sits IN", so the first build widened
+the 1-bit sky ring from 7 px to 10 and shrank the moon to keep the footprint. Captured, it read as
+a *thicker annulus* — because the ring's width was never the problem:
+
+> On the light theme the page is white, the sky black, the lit limb white and the shadow black.
+> **Three regions have to be distinct and a 1-bit panel has two colours.** No arrangement of black
+> and white separates page / lit / shadow.
+
+The third tone is a dithered fill. The shadow now uses `theme_muted()` under `PBL_BW`, so it sits
+between the solid sky and the white limb, and the moon reads as a disc with a shaded part in
+**both** themes instead of an outline with a bite out of it. This is the Phase-7 page-dot rule run
+backwards: there dithering was the defect and `theme_fg()` the fix; here dithering *is* the fix.
+Fill-vs-stroke decides whether an element dithers — which makes it a bug or a tool depending on
+what the element is for.
+
+#53's `icon_draw_moon_small()` was a plain filled disc: its own comment narrates three abandoned
+attempts at carving a crescent and settles for "an unfilled ring", which it also never draws. The
+crescent is trivial once the background is known, and it is — the header paints over the card's own
+fill. Implemented as a static in `night_sky.c` rather than in `icons.c`: the helper has exactly one
+caller and the defect is small-classes-only, so the shared file stays out of the blast radius.
+
+### Precipitation (#39–#43) — and a regression I caught by measuring the wrong thing first
+
+`chart_bot = H - 86` is gabbro's constant. On chalk it put the floor at 94 against a pill at 140, so
+a 100 %-probability bar was **18 px tall with 26 px of empty card beneath it**. Derived from the
+pill instead, chalk's chart goes **36 px → 60** and rect's 60 → 62 (#41), which also absorbs most of
+#42 — the residual gap is structural, since bars are bottom-anchored and the header is top-anchored.
+
+Horizontally the block is now solved from `ui_band_w()` at the hour-label row: ink spans **x 14..134
+on a 144 px screen, against x 1..143 before** (#39). One misstep worth recording: sizing the label
+box to exactly the bar pitch ellipsized "Now" to "N…". Measured on chalk, "Now" is 23 px of ink
+against a 24 px pitch — it fits — but a font's **layout** width includes side bearings and exceeds
+its ink, and the draw call measures the former. The box now overhangs the pitch; boxes overlap,
+ink does not, and ink is what has to clear the margin.
+
+#43's header glyph passed `theme_accent_blue()` for **both** the cloud and the drops, so on 1-bit it
+was a solid fg blob with the drops drawn in the same ink underneath. Phase 5 never reached it
+because `icons.c`'s `ICON_*_COLOR` macros are file-local and only wire up the two condition
+dispatchers. Fixed at **both** call sites — the Big Mode header duplicates the glyph, which is the
+#99 rule applied before it could bite.
+
+### What's New (#65–#68)
+
+The header was eating **118 px of a 168 px screen** and the note got ~50 px. `"New on the horizon"`
+is ~200 px at 24_BOLD, so it wrapped to two lines; the small classes take a one-line headline, an
+18 px sun and a tighter rhythm, and the viewport roughly doubles (#66).
+
+#65's cue is a chevron on an opaque knockout, drawn only while `off > frame_h - content_h` — the
+quantity the scroll handler already computed. Verified as a real state indicator, not decoration:
+after 30 down-presses the cue strip measures **0 ink pixels**. It also got its own reserved band
+after the first build put it *over* the note, where the knockout simply punched a hole in whatever
+line was at the bottom — trading one unreadable line for another.
+
+#67: the body scrolls, so every line eventually passes the viewport's lowest row and the column has
+to fit the chord **there**. Chalk's ran x 34..172 against a chord of ~39..141, with the accent
+marker at x=20 outside the glass entirely. Now a chord-derived column at 14_BOLD.
+
+**#68 does not reproduce.** The top-left corner is clean across three scroll positions and both
+themes on diorite (0 non-background pixels in x 0..29 / y 0..15). Recorded as not-reproducing
+rather than fixed, since nothing was changed with it in mind.
+
+### The singles
+
+* **#44** — "PEAK 7"'s box bottom landed exactly on the pill top (`c.y + 24 + 18 == 126`). Clamped
+  to the content area; measured 4 px → **8 px** of clearance. But reserving the full box then
+  squeezed the gap to "LOW" from 6 px to 2 — *moving* the crowding rather than removing it — so the
+  clamp reserves 16 px and the row sits ~6 px off the pill and ~3 off the label.
+* **#47** — the register says the numeral "overlaps the arc inner edge". Measured on diorite it
+  **clears it by 1 px**; the numeral ink starts at y=57 and the arc's dither ends at y=55. 1 px is a
+  coincidence rather than clearance, so both twins (`uv.c` and `air_quality.c`, identical
+  construction) move 2 px down for ~3 px each way.
+* **#48** — the pulse trace crams three excursions into ~12 px at the header's 18 px and merges into
+  an angular wedge. One dip and one spike with real flat baseline reads as an ECG.
+* **#49** — the sunrise/sunset chevron arms are a hardcoded 3 px at stroke 2, and on 1-bit that is
+  the *entire* difference between the two glyphs once both collapse to `theme_fg()`. Replaced under
+  `PBL_BW` with a filled triangle head that scales with the glyph.
+* **#86** — `sun_cycle.c`'s two dotted separators were the last 1-bit-reachable muted **strokes** in
+  `cards/`. Now visible.
+
+`icons.c` gained `#include "ui.h"` for #48's screen-class guard; the locked pair's binaries did not
+move, confirming the header contributes no code.
+
+### Refresh sheet (#92) — and the register's numbers were stale
+
+The register quotes a 48/54 px box; the code as it stands yields **65/72**. Either way it is two
+lines of 24_BOLD and `FALLBACK_PHRASE` (39 chars) needs four. Now 18_BOLD in a chord-fitted box, and
+the chord is measured at the **bottom of a three-line block** rather than at the box's centre: the
+box runs to the sheet's edge and the text is top-anchored inside it, so the box's centre is nowhere
+near the text — the same reasoning as the Phase-6 axis labels. First guards, and the first `ui.h`
+dependency, in this file.
+
+Verifying it needed two pieces of instrumentation, because the sheet is only reachable on a slow or
+failed refresh: the phrase forced to `FALLBACK_PHRASE`, **and** `prv_start_close()` held, because
+live emulator data completes the refresh before a screenshot can start. Both platforms then show
+the full phrase in three lines with nothing clipped.
+
+### Verification
+
+Cards 4–8 on basalt, chalk and diorite (15 shots, all asserted distinct), flint spot-checked on the
+two cards its `PBL_BW` changes touch, plus dedicated before/after pairs for every defect above.
+Fourteen clean builds, `lock_guard.py` green at each.
+
+A pleasant side observation: chalk's pill now reads "UPDATED 10M" where basalt reads
+"UPDATED 8M AGO" — Phase 7's cascade firing on chalk's 104 px inner box and dropping a word rather
+than ellipsizing the number, exactly as designed, on data nobody arranged.
+
+### Emulator note
+
+`pebble wipe` recovers a wedged emulator (basalt hung mid-install twice and no amount of process
+killing fixed it), at the cost of resetting persisted state — which re-arms the What's New modal, so
+the next launch is the notes screen and not card 0. Two capture runs were silently of the wrong
+screen before that was spotted.
+
+### Still open on these screens
+
+#68 (not reproducing). #42's residual header-to-bar gap is structural.

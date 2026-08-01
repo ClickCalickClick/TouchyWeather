@@ -152,7 +152,8 @@ void card_air_quality_draw(GContext *ctx, GRect bounds) {
   // drop the pollen badge to the caption font) so all elements clear the
   // shrunken gauge and the banner.
 #if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
-  int num_top = c.y - 38, num_h = 44, label_dy = 4, pollen_dy = 22;
+  // #47, same construction as uv.c — fixed in both, per the #99 rule.
+  int num_top = c.y - 36, num_h = 44, label_dy = 4, pollen_dy = 22;
 #else
   int num_top = c.y - 32, num_h = 50, label_dy = 18, pollen_dy = 40;
 #endif

@@ -5,8 +5,36 @@
 #include "nav.h"
 #include "detail_modal.h"
 #include "weather_data.h"
+// First screen-class dependency in this file (#92). ui_layout.h pulls in ui.h,
+// and both are fully guarded to the small classes, so the locked pair sees no
+// new code.
+#include "ui_layout.h"
 #include <stdlib.h>
 #include <string.h>
+
+// #92 — the phrase box holds two lines and some phrases need four.
+//
+// The box is `x 8 .. w-8` of GOTHIC_24_BOLD, which is ~10 characters per line
+// on a 144px screen. FALLBACK_PHRASE ("Couldn't reach the forecast just now...",
+// 39 chars) needs about four lines and the box has room for two, so it clipped —
+// and on chalk the box is a flat rect on a circle, so a second line low on the
+// glass was cut at both ends as well. Only a slow or failed refresh reaches this
+// text, which is why every happy-path capture looked clean.
+//
+// 18_BOLD fits three lines in the same height and ~14 characters per line, and
+// the box is chord-fitted. The chord is measured at the BOTTOM of a three-line
+// block rather than at the box's centre: the box is much taller than the text
+// (it runs to the sheet's edge) and the text is top-anchored inside it, so the
+// centre of the BOX is nowhere near the text, and on a circle that difference
+// is the whole defect. Same reasoning as detail_modal.c's axis labels.
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+#define RS_PHRASE_FONT ui_font_header()
+#define RS_TEXT_DY     22
+#define RS_LINE_H      22
+#else
+#define RS_PHRASE_FONT fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD)
+#define RS_TEXT_DY     28
+#endif
 
 // Tuning constants ----------------------------------------------------------
 
@@ -362,14 +390,19 @@ static void prv_sheet_update(Layer *layer, GContext *ctx) {
     const char *phrase = s_up_to_date   ? UP_TO_DATE_PHRASE
                         : s_show_fallback ? FALLBACK_PHRASE
                                           : s_phrases[s_phrase_idx];
-    int text_y = cy + 28;
+    int text_y = cy + RS_TEXT_DY;
     int text_h = b.size.h - (text_y - b.origin.y) - 8;
     if (text_h < 24) text_h = 24;
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+    int tw = ui_band_w(b, text_y + 3 * RS_LINE_H - 1, 1);
+    GRect tr = GRect(b.origin.x + (b.size.w - tw) / 2, text_y, tw, text_h);
+#else
     GRect tr = GRect(b.origin.x + 8, text_y,
                      b.size.w - 16, text_h);
+#endif
     graphics_context_set_text_color(ctx, theme_fg());
     graphics_draw_text(ctx, phrase,
-                       fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+                       RS_PHRASE_FONT,
                        tr, GTextOverflowModeWordWrap,
                        GTextAlignmentCenter, NULL);
   }
