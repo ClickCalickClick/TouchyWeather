@@ -1556,3 +1556,88 @@ a screenshot rather than an assertion.
 Big-Mode capture sets were of a stale card before a distinct-shot assertion caught it — the same
 `md5 | sort -u` check that has caught every other capture failure in this project, and the one I
 skipped on that run. Assert distinctness on every set, including the ones that "obviously" differ.
+
+---
+
+## Phase 10 as built
+
+D6b plus the polish tail. `icons.c` only — every edit behind `PBL_BW`, which emery and gabbro
+cannot compile, so the lock was never at risk. Green at every build.
+
+**Closed:** #26 #33 #84 #80. **#27, #29 and #35 do not reproduce as written** and were left alone;
+see below, because "measure before changing" is the whole point of recording them.
+
+### D6b: fill-vs-outline is the alphabet
+
+Phase 5's remap made every condition *visible*; the register was right to keep "distinguishable" as
+a separate defect. Forcing all seven conditions into one Hours column showed why: at the 13–14 px
+that column uses, cloudy / rain / snow / storm are the **same ~10×9 dithered smudge**, and the only
+three that read — sunny, partly, fog — read because they differ in FILL rather than in detail.
+
+So fill and outline carry the meaning:
+
+| condition | 1-bit glyph |
+|---|---|
+| sunny | solid disc |
+| partly | solid disc + solid cloud |
+| cloudy | **hollow** cloud |
+| rain | hollow cloud + 3 vertical ticks |
+| snow | hollow cloud + 3 square pips |
+| storm | **solid** cloud + bolt |
+| fog | 3 solid bars |
+
+"Hollow" is drawn by filling the silhouette and carving it with the background, not by stroking a
+path: a stroked circle overlapping a stroked rect shows its internal seams at 14 px, while a carve
+leaves one clean outline of the union. Same technique as the Night Sky crescent.
+
+Three details only the captures could have settled:
+
+1. **Rain's ticks merged into a solid block** at stroke 2 with `size/4` spacing — the glyph read as
+   a filled cloud with a tail. 1 px at small sizes, spaced `size/3`.
+2. **Snow's dots vanished.** A radius-1 circle is one pixel; next to rain's ticks it read as
+   nothing. Square 2×2 pips read as "not a line", which is the distinction that matters.
+3. **Partly-cloudy's hollow cloud didn't work at 3/4 scale** — the carve is too small to register.
+   It is solid there, and CLOUDY owns the hollow form. Disc-plus-solid against outline-only is a
+   stronger pair than two near-identical outlines anyway.
+
+### #80 was the twin, again
+
+`icon_draw_condition_animated()` is a **second dispatcher** over the same conditions, used by the
+hero and by What's New. Fixing only `icon_draw_condition()` would have left the same condition
+rendering as a solid silhouette in a Hours row and as a borderless dither field in the hero directly
+above it. **This is the third time in this project that a defect lived in a duplicated helper**
+(#99 in the detail sheet, #43 in Precipitation's two headers, #80 here). The rule has earned its
+place: when a fix lands in one of two dispatchers, go and find the other one.
+
+Verified at hero scale with the condition pinned per build — cloudy, rain, snow and storm are four
+obviously different 40 px glyphs. The rotating sun is kept on 1-bit; it is the app's signature and a
+solid disc with rays reads perfectly well. The other conditions lose their bob, which was never
+legible at 1 bit.
+
+### The polish tail: three defects that measured as non-defects
+
+* **#27** ("`°` kerns into the preceding digit; '78°' reads '78o'"). The stated mechanism is wrong.
+  A pixel map of "71°" at 14_BOLD shows a **3 px gap** between the "1" and the degree ring, and the
+  ring sitting in the upper half of the digit height — which is correct degree placement. What is
+  true is that GOTHIC_14_BOLD's `°` is a chunky 5×5 ring; that is the system font's glyph, and
+  replacing it means hand-drawing rings on the row-draw path for every temperature on two cards.
+  Not worth it for a cosmetic minor. **Documented, not changed.**
+* **#29** ("row icons ride ~4 px high"). Measured: icon ink centre 42.5 against text centre 41.0 —
+  **1.5 px LOW**, not 4 px high, i.e. aligned within a pixel of rounding for an 18 px-tall glyph
+  against 9 px of text.
+* **#35** ("5 rows in a 100 px band, top-heavy with dead space above the pill"). Measured: block ink
+  38..112 in a 26..126 band — **12 px above, 13 px below**. Balanced. Phase 4 predicted exactly this
+  ("partly addressed as a side effect" of routing Week through the real pill geometry) and it was
+  right.
+
+Three of the four remaining minors were already fixed or mis-stated, which is consistent with #16,
+#47, #50 and #68 before them. **The register was written from screenshots taken before Phase 1;
+after nine phases of geometry changes, an entry describes the app that was, not the app that is.
+Measure the current build before changing code to match a description of an old one.**
+
+### Verification
+
+diorite in both themes on live data (theme flip asserted by mean luminance 206 → 49), showing solid
+discs, disc-plus-cloud and hollow clouds as three distinct row glyphs, and the Week card rendering
+four different conditions unambiguously. Hero scale verified separately with pinned conditions.
+Colour platforms are untouched by construction — every edit is inside `PBL_BW`.
