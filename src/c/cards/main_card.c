@@ -103,9 +103,22 @@ void card_main_draw(GContext *ctx, GRect bounds) {
   if (settings_get_big_mode()) {
     int icon_size, icon_y, temp_y, hilo_y;
 #if defined(UI_SCREEN_SMALL_RECT)
-    icon_size = 40; icon_y = 4;  temp_y = 46;  hilo_y = 96;
+    // Retuned against measured INK, not the boxes (Phase 9). At the shipped
+    // values the hi/lo ink ran from 101 to 120 and the Big-Mode pill starts at
+    // 120 — a pixel-band scan showed the two merging into ONE contiguous run of
+    // ink, which is #76 ("the degree ring merges with the pill outline") stated
+    // exactly. At the same time the icon's rays reached row 0 — the Big-Mode
+    // instance of #16, which Phase 5 closed for normal mode only — while 22px
+    // sat dead between the icon and the temperature (#77).
+    //
+    // The band is 4..116 (ui_content_bottom in Big Mode) and the three rows'
+    // ink is 37 + 29 + 19 = 85, so the slack is 27px: 13 to each gap, and the
+    // stack now starts at 4 and ends at 112 with 8px of air above the pill.
+    icon_size = 40; icon_y = 8;  temp_y = 40;  hilo_y = 89;
 #elif defined(UI_SCREEN_SMALL_ROUND)
-    icon_size = 46; icon_y = 10; temp_y = 54;  hilo_y = 104;
+    // chalk has the room (#76 is not on its platform list and it measured 6px
+    // clear); this only evens out #77's 20-vs-13 gap split.
+    icon_size = 46; icon_y = 10; temp_y = 51;  hilo_y = 105;
 #elif defined(UI_SCREEN_LARGE_RECT)
     icon_size = 60; icon_y = 18; temp_y = 74;  hilo_y = 138;
 #else  // UI_SCREEN_LARGE_ROUND
@@ -132,7 +145,15 @@ void card_main_draw(GContext *ctx, GRect bounds) {
     GSize lo_sz = graphics_text_layout_get_content_size(lo_buf, hilo_font,
         GRect(0, 0, W, 40), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
     int arrow = (icon_size >= 60) ? 16 : 12;
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+    // #79 — the arrow's ink ends ~1px short of the digit box (its arms reach
+    // arrow/2 plus half of a 3px stroke), so at 24_BOLD in Big Mode the glyphs
+    // touch. 2px more gutter is the whole fix; the large classes' wider arrows
+    // and bigger type never had the problem.
+    int ag = 6;          // arrow -> its number
+#else
     int ag = 4;          // arrow -> its number
+#endif
     int group_gap = 16;  // high group -> low group
     int th = (icon_size >= 60) ? 34 : 28;  // hi/lo text box height
     int hi_group_w = arrow + ag + hi_sz.w;

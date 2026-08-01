@@ -1482,3 +1482,77 @@ screen before that was spotted.
 ### Still open on these screens
 
 #68 (not reproducing). #42's residual header-to-bar gap is structural.
+
+---
+
+## Phase 9 as built
+
+Big Mode on the small classes: `main_card.c` and `hours.c`, both entirely inside their existing
+`if (settings_get_big_mode())` blocks and additionally behind compile-time small-class guards, per
+Part 0 rule 3 — Big Mode is a *runtime* branch that emery and gabbro also execute, so a guard on the
+mode alone would have moved the locked pair. `lock_guard.py` green at every build, including the
+instrumented ones.
+
+**Closed:** #76 #77 #78 #79, plus a new defect the measurement turned up (#100, below).
+
+### The register's numbers were wrong in both directions, and only a band scan showed it
+
+Big Mode is phone-configured and the Settings card is read-only on the small classes since Phase 2,
+so it was forced on via a guarded `settings_get_big_mode()` return. Scanning the rendered rows into
+ink bands, basalt's main card measured:
+
+```
+BEFORE                                AFTER
+  icon   y   0.. 36                     icon   y   3.. 40
+  (gap 22)                              (gap 12)
+  temp   y  59.. 87                     temp   y  53.. 81
+  (gap 13)                              (gap 12)
+  hi/lo + PILL  y 101..147  <- ONE      hi/lo  y  94..112
+                               band     (gap 7)
+                                        pill   y 120..147
+```
+
+* **#76 is confirmed in the strongest possible form**: hi/lo's ink and the pill did not merely touch,
+  they scanned as a **single contiguous band**, which is what "the degree ring merges with the pill
+  outline" means in pixels. Now a separate band with 7px of air.
+* **#77 does not reproduce as written.** The register says "~90px dead band"; the real gap was
+  **22px** against 13 below — an imbalance, not a chasm. The 90px figure appears to have been taken
+  from a large class or a pre-Phase-3 layout. Rebalanced to 12/12 on rect and 17/17 on chalk.
+* **#100 (new): in Big Mode the hero icon's rays reach row 0.** This is #16 — which Phase 5 closed
+  by measurement — surviving in the Big Mode path, because Phase 3 only ever rewrote the *normal*
+  mode layout. Same retune fixes it; the icon now starts at row 3.
+
+The retune is stated as ink, not boxes: the band is 4..116, the three rows' ink is 37 + 29 + 19 = 85,
+so 27px of slack splits into two 13px gaps. Working in box coordinates is what produced the original
+table, where a 28px text box whose ink sits 5px down and 8px short reads as "clear of the pill"
+while the glyphs are not.
+
+### #78 and #79
+
+`icon_cy = row_y + th/2 - 2` centres the row icon on its text BOX, but GOTHIC_24_BOLD's ink sits low
+inside that box — measured, text ink 44..59 (centre 51.5) against an icon centre of 47. The icons
+floated about 5px high and read as belonging to the row above. Centred on the ink instead.
+
+#79 is two pixels: the arrow's ink ends ~1px short of the digit box (its arms reach `arrow/2` plus
+half a 3px stroke) so the glyphs touch at 24_BOLD. `ag` 4 → 6 on the small classes.
+
+**A caution about measuring icons across builds.** The first before/after comparison of #78 showed
+the icon's ink centre barely moving, which looked like the edit had not taken. It had — the *live
+condition had changed between captures*, so the two shots were of different glyphs with different
+ink extents. Icon geometry can only be compared across builds with the condition pinned, or by eye
+on a zoomed crop; a bare centre-of-ink number is not comparable.
+
+### Verification
+
+Big Mode forced on, basalt and chalk, main card and 6 Hours, with band scans before and after and
+zoomed crops for the two two-pixel fixes. Then the force reverted and **normal mode re-captured** to
+confirm it is untouched — the whole phase lives inside Big-Mode branches, but that is a claim worth
+a screenshot rather than an assertion.
+
+### Emulator note, and a false pass it nearly caused
+
+`pebble install` needs roughly **10–14 seconds** before the app has relaunched and rendered; at the
+`sleep 2`–`sleep 5` this project has used elsewhere the screenshot catches the *previous* state. Two
+Big-Mode capture sets were of a stale card before a distinct-shot assertion caught it — the same
+`md5 | sort -u` check that has caught every other capture failure in this project, and the one I
+skipped on that run. Assert distinctness on every set, including the ones that "obviously" differ.

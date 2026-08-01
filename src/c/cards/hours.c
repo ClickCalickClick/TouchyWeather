@@ -118,7 +118,16 @@ void card_hours_draw(GContext *ctx, GRect bounds) {
       int i = idx[k];
       int row_y = top_y + k * row_h;
       int icon_cx = cluster_x + time_w + gap + row_icon / 2;
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+      // #78 — `th/2 - 2` centres the icon on the text BOX, but GOTHIC_24_BOLD's
+      // ink sits low in its box, so the icon floated ~5px above the digits it
+      // belongs to and read as part of the row above. Measured on basalt: text
+      // ink 44..59 (centre 51.5) against an icon centre of 47. Centre it on the
+      // ink instead. Large classes keep the box-centred expression verbatim.
+      int icon_cy = row_y + th / 2 + 2;
+#else
       int icon_cy = row_y + th / 2 - 2;
+#endif
       graphics_context_set_text_color(ctx, theme_fg());
       graphics_draw_text(ctx, d->hours_label[i], row_font,
           GRect(cluster_x, row_y, time_w + 4, th),
