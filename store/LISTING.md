@@ -107,9 +107,16 @@ two things nothing else on the store has:
 3. `13-detail-hours` — hold SELECT and the chart slides up
 4. `11-card-radar` — live radar *(emery / gabbro only)*
 5. `02-card-advice` — Touch & Go having an opinion
-6. `12-card-settings` — build your own deck
+6. `12-card-settings` — the deck, your way
 
 On the platforms without radar, use `05-card-precip` in slot 4.
+
+Slot 6 does not show the same thing everywhere, so do not reuse one caption.
+On emery and gabbro the Settings card manages the deck on the watch — SELECT
+toggles a card, an UP/DOWN hold reorders it — and "build your own deck" is
+accurate. On the four small-screen platforms that management moved to the phone,
+so the card is a settings summary (theme, Big Mode, a CARDS IN APP pointer) and
+should be captioned as such.
 
 Native-resolution PNGs for every platform are in
 [screenshots/](screenshots/).

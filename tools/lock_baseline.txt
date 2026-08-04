@@ -1,5 +1,5 @@
 # Masked sha256 of the LOCKED platform binaries.
 # Regenerate deliberately (tools/lock_guard.py --save) and say so in the commit.
 
-543e34054adfd226c88c43a920494c0bdaf120422c437aea298238139153126f  emery
-7f76d42c1d3677d8cf035517bedbefb676b053c153b00ee062506ed1e44332ad  gabbro
+b2e06f1fe37d08ce2c5b3dc2032609a24d4ca1f7186896d226fc9c73ce650fb3  emery
+5bde22b3411a133aedbf700574c1ddcdaa33fe18760809d94418d0d3c1b81d66  gabbro

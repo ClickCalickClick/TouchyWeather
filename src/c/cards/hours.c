@@ -46,8 +46,22 @@ static bool fmt_precip(const WeatherData *d, int i, char *buf, size_t n) {
     int mm = (d->hours_precip_x10[i] + 9) / 10; // ceil, always >= 1
     snprintf(buf, n, "%dmm", mm);
   } else {
-    int x = d->hours_precip_x10[i];
-    snprintf(buf, n, "%d.%d\"", x / 10, x % 10);
+    // hours_precip_x10 is TENTHS OF A MILLIMETRE on every platform: index.js
+    // requests only temperature_unit and wind_speed_unit, and Open-Meteo
+    // reports precipitation in mm regardless of those, so the imperial branch
+    // has to do the conversion itself. Printing the mm digits under an inch
+    // mark overstated every wet hour by 25.4x (3.8mm rendered as 3.8", which
+    // reads as four inches of rain in one hour).
+    //
+    // Hundredths is the US convention for rainfall and is what keeps a light
+    // hour off a flat "0.0" beside a droplet icon; a measurable-but-tiny amount
+    // floors at 0.01" rather than rounding away, since fmt_precip is only
+    // reached when the hour is wet at all. On the small classes the existing
+    // shortener takes "0.15\"" to ".15\"", the same glyph count the old format
+    // occupied, so the D2 cascade sees no new pressure.
+    int hundredths = (d->hours_precip_x10[i] * 1000 + 1270) / 2540;
+    if (hundredths < 1) hundredths = 1;
+    snprintf(buf, n, "%d.%02d\"", hundredths / 100, hundredths % 100);
   }
   return true;
 }
