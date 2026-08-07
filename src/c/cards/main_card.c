@@ -156,9 +156,41 @@ void card_main_draw(GContext *ctx, GRect bounds) {
 #endif
     int group_gap = 16;  // high group -> low group
     int th = (icon_size >= 60) ? 34 : 28;  // hi/lo text box height
+    // The unit letter. Big Mode drops the wind row, and that row carries the
+    // app's ONLY "MPH"/"KMH" string (see the Normal layout below) — so before
+    // this there was no way to tell Fahrenheit from Celsius ANYWHERE in the
+    // app while Big Mode was on. That is what makes a stale or first-launch
+    // imperial reading look like a units bug rather than stale data (r/pebble
+    // 2.0 thread). It rides the hi/lo cluster rather than suffixing the hero
+    // numeral because BITHAM_42 "100°F" does not fit 120px of usable width.
+    // Same font as the hi/lo digits so it shares their baseline for free.
+    const char *unit_buf = (d->units == UNITS_METRIC) ? "C" : "F";
+    GSize unit_sz = graphics_text_layout_get_content_size(unit_buf, hilo_font,
+        GRect(0, 0, W, 40), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+    int ug = 6;          // low number -> unit letter
     int hi_group_w = arrow + ag + hi_sz.w;
     int lo_group_w = arrow + ag + lo_sz.w;
-    int cluster_w = hi_group_w + group_gap + lo_group_w;
+    int cluster_w = hi_group_w + group_gap + lo_group_w + ug + unit_sz.w;
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+    // The small classes have 120px (144 rect) / 140px (180 round) usable, and
+    // the hi/lo pair alone already measures ~122 at two digits — so the unit
+    // letter has to be paid for out of the gaps. Re-measured after each step
+    // rather than hardcoded, so sub-zero lows and three-digit highs stay right.
+    // The large classes have the room and keep the expression above verbatim.
+    const int hilo_usable = W - 2 * UI_MARGIN_X;
+#define HILO_REMEASURE() do {                                          \
+      hi_group_w = arrow + ag + hi_sz.w;                               \
+      lo_group_w = arrow + ag + lo_sz.w;                               \
+      cluster_w = hi_group_w + group_gap + lo_group_w + ug + unit_sz.w;\
+    } while (0)
+    // 1. close the gap between the high and low groups
+    if (cluster_w > hilo_usable) { group_gap = 8; HILO_REMEASURE(); }
+    // 2. tighten each arrow against its own number, and the unit against the low
+    if (cluster_w > hilo_usable) { ag = 4; ug = 4; HILO_REMEASURE(); }
+    // 3. last resort — shrink the arrows themselves rather than clip a digit
+    if (cluster_w > hilo_usable) { arrow = 10; HILO_REMEASURE(); }
+#undef HILO_REMEASURE
+#endif
     int cx = ox + (W - cluster_w) / 2;
     int arrow_cy = hilo_y + th / 2 - 2;
     graphics_context_set_text_color(ctx, theme_fg());
@@ -170,6 +202,9 @@ void card_main_draw(GContext *ctx, GRect bounds) {
     icon_draw_arrow_down(ctx, GPoint(lx + arrow / 2, arrow_cy), arrow, theme_fg());
     graphics_draw_text(ctx, lo_buf, hilo_font,
         GRect(lx + arrow + ag, hilo_y, lo_sz.w + 4, th),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+    graphics_draw_text(ctx, unit_buf, hilo_font,
+        GRect(lx + lo_group_w + ug, hilo_y, unit_sz.w + 4, th),
         GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
     // Status banner (enlarged for Big Mode inside ui_draw_status_banner).
     ui_draw_auto_banner(ctx, bounds, d->rain_alert_min, d->last_updated,

@@ -176,6 +176,18 @@ one feature, so they stay here permanently.
 * `emu-button click back` EXITS the watchapp unless a modal is open.
 * `pebble wipe` recovers a wedged emulator but resets persisted state, which RE-ARMS the What's New
   modal — the next launch is the notes screen, not card 0.
+* **The same applies the first time a build runs on a platform you have not driven before.** An
+  emulator for a fresh platform arms the notes screen, it SWALLOWS every early button press, and
+  the `back` that follows exits the watchapp to the Timeline ("No events") — a whole 14-shot emery
+  set came back as notes and Timeline. `update_notes_maybe_show()` persists the seen-version the
+  instant it displays, so the fix is to **install twice**: the first launch disarms it, the second
+  starts on card 0. Cheap, and it makes a capture run reproducible across platforms.
+* **`sizeof(WeatherData)` is 480 bytes and `PERSIST_DATA_MAX_LENGTH` is 256 — the cache persists
+  anyway.** `prv_save_cache()` writes the whole struct and does not check the return. That looks
+  like a guaranteed silent-failure bug and is not one: verified 2026-08-07 by relaunching and
+  reading `comm.c:683> Data is 187 secs old (<900 threshold), skipping fetch`, which can only come
+  from a blob written by the previous run. Do not "fix" it, and do not re-derive it — the SDK
+  header's 256 is documented for strings and is not what the firmware enforces here.
 * Detail sheets open with a long press: `click select --duration 800`.
 * No `timeout` command on macOS. No ImageMagick; PIL is available, and contact sheets are the
   fastest way to review a set.

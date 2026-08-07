@@ -172,9 +172,16 @@ static void touch_handler(const TouchEvent *event, void *context) {
         }
       } else if (adx < TAP_THRESHOLD && ady < TAP_THRESHOLD) {
         // Tap (small movement). On the Settings card, advance the
-        // row cursor. Elsewhere we ignore taps for now.
+        // row cursor; on the 6 Hours card in Big Mode, page the hour window
+        // (the touch mirror of SELECT — swipe-up is already the detail modal
+        // and horizontal swipes are card nav, so tap was the free gesture).
+        // Elsewhere we ignore taps for now.
         if (strcmp(nav_current_name(), "Settings") == 0) {
           settings_cursor_advance();
+          nav_redraw();
+        } else if (strcmp(nav_current_name(), "6 Hours") == 0 &&
+                   card_hours_pages_active()) {
+          card_hours_page_next();
           nav_redraw();
         }
       }
@@ -239,6 +246,17 @@ static void prv_select_click(ClickRecognizerRef r, void *ctx) {
   // the gesture budget.
   if (strcmp(nav_current_name(), "Main") == 0) {
     refresh_sheet_show_programmatic();
+    return;
+  }
+  // 6 Hours card in Big Mode: SELECT pages the 3-row window between the odd
+  // and even halves of the +1h..+6h forecast. Claimed here rather than on a
+  // new gesture because Big Mode's whole premise is fewer, larger controls,
+  // and this is the only card in Big Mode that withholds data it already
+  // holds. The theme toggle is untouched in Normal mode and on every other
+  // card in both modes, so no user loses it outright.
+  if (strcmp(nav_current_name(), "6 Hours") == 0 && card_hours_pages_active()) {
+    card_hours_page_next();
+    nav_redraw();
     return;
   }
   // Ordinary cards: toggle theme only if the user hasn't disabled it
