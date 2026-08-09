@@ -32,6 +32,13 @@ static AdviceDebugContext s_debug_ctx;
 static const WeatherData *prv_effective_weather(const WeatherData *src,
                                                 WeatherData *scratch) {
   *scratch = *src;
+  // Every wind_speed below is written in the unit `units` implies — 36 km/h,
+  // 23 mph. Pin the scratch's wind unit to agree, or running the matrix with
+  // m/s selected measures those numbers against the 9 m/s alert threshold and
+  // trips ADV_WIND in the six cases that are not about wind at all. One line
+  // here rather than a third arm on seven separate ternaries.
+  scratch->wind_units = (scratch->units == UNITS_METRIC) ? WIND_UNITS_KMH
+                                                        : WIND_UNITS_MPH;
   s_debug_ctx.force_daytime_set = false;
   s_debug_ctx.force_daytime = false;
   s_debug_ctx.force_hour_set = false;
@@ -719,7 +726,13 @@ static AdviceTier prv_classify(const WeatherData *d) {
   int hot_thresh = metric ? 30 : 86;
   int chilly_thresh = metric ? 7 : 45;
   int muggy_temp_thresh = metric ? 21 : 70;
-  int wind_alert_thresh = metric ? 32 : 20;       // 20 mph ~= 32 km/h
+  // Keyed on the WIND unit, not `units` — those axes are independent now
+  // (WindUnits in weather_data.h). 20 mph ~= 32 km/h ~= 9 m/s, all of which
+  // sit at the top of Beaufort 5. A table rather than a ternary chain so a
+  // fourth unit is one entry, and safe to index unguarded because comm.c
+  // clamps wind_units on receipt.
+  static const uint8_t wind_alert_by_unit[3] = { 20, 32, 9 };
+  int wind_alert_thresh = wind_alert_by_unit[d->wind_units];
   int late_night_cool_thresh = metric ? 13 : 55;  // cool but not freezing
 
   bool daytime = prv_is_daytime(d);
@@ -856,11 +869,11 @@ static void prv_generate_tier_headline(AdviceTier tier, const WeatherData *d,
 #endif
       break;
     case ADV_WIND:
-      if (d->units == UNITS_METRIC) {
-        snprintf(buf, buf_size, "%d KMH GUSTS", d->wind_speed);
-      } else {
-        snprintf(buf, buf_size, "%d MPH GUSTS", d->wind_speed);
-      }
+      // One format string, not one per unit: the branchy version duplicated
+      // " GUSTS" into the binary for each case and would have grown by a third
+      // string for m/s. %s off wind_unit_label() is smaller than what it
+      // replaces.
+      snprintf(buf, buf_size, "%d %s GUSTS", d->wind_speed, wind_unit_label(d));
       break;
     case ADV_HIGH_UV:
       // Match the trigger: show today's peak so the advice subtitle

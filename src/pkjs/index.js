@@ -133,6 +133,32 @@ function getUnits() {
   return localStorage.getItem('units') === 'metric' ? 'metric' : 'imperial';
 }
 
+// Wind speed unit, INDEPENDENT of the measurement system. Requested on
+// r/pebble by a Danish user: m/s is the everyday wind unit across Scandinavia
+// while °C was never in question, so folding it into `units` would have been
+// the wrong axis. Stored as the raw Clay choice; 'auto' is the default, which
+// is what keeps this from changing anything for existing users.
+function getWindUnitPref() {
+  var w = localStorage.getItem('windUnit');
+  return (w === 'mph' || w === 'kmh' || w === 'ms') ? w : 'auto';
+}
+
+// Resolve 'auto' against the measurement system. Deliberately done phone-side:
+// the request has to name a concrete unit anyway (wind_speed_unit=), so
+// sending the RESOLVED value means the watch never consults its units setting
+// to label wind, and carries no AUTO case at all. See WindUnits in
+// weather_data.h — that is a branch removed from the watch, not added.
+function resolveWindUnit(units) {
+  var w = getWindUnitPref();
+  if (w !== 'auto') return w;
+  return units === 'metric' ? 'kmh' : 'mph';
+}
+
+// Our storage strings are exactly Open-Meteo's wind_speed_unit values, so the
+// URL takes them verbatim. The watch does not — it gets this enum, which must
+// stay in step with WindUnits in weather_data.h.
+var WIND_UNIT_CODE = { mph: 0, kmh: 1, ms: 2 };
+
 function getUseDewPoint() {
   return localStorage.getItem('useDewPoint') === '1';
 }
@@ -372,6 +398,18 @@ var CAPTURE_MODE = false;
 var CAPTURE_LAT = 37.7749;
 var CAPTURE_LON = -122.4194;
 
+// NO-DATA MODE — must also be false in any shipped build.
+//
+// The opposite harness: answer the watch with NOTHING, so the app stays in the
+// state it holds before its first reading ever lands. That state is otherwise
+// impossible to photograph — the fetch replies about a second after launch, and
+// a screenshot cannot be timed inside that window reliably. It is what a user
+// sees on a first-ever install, and (until the cache key was pinned) after any
+// update that orphaned their cache, so it is worth being able to reproduce on
+// demand rather than by luck. Every card should show NO DATA YET / WAITING FOR
+// PHONE; a card showing numbers here is fabricating them.
+var CAPTURE_NO_DATA = false;
+
 function capturePayload() {
   var now = new Date();
   var msg = {
@@ -432,6 +470,11 @@ function capturePayload() {
 }
 
 function fetchWeather(lat, lon) {
+  if (CAPTURE_NO_DATA) {
+    console.log('no-data mode: withholding payload');
+    fetchDone();
+    return;
+  }
   if (CAPTURE_MODE) {
     // Seed the radar's coordinates so its real pipeline still has a centre.
     lastLat = CAPTURE_LAT;
@@ -449,7 +492,7 @@ function fetchWeather(lat, lon) {
   trackPing(lat, lon); // anonymous once-per-day active-user ping (fire-and-forget)
   var units = getUnits();
   var tempUnit = units === 'metric' ? 'celsius' : 'fahrenheit';
-  var windUnit = units === 'metric' ? 'kmh' : 'mph';
+  var windUnit = resolveWindUnit(units);
 
   var fc = 'https://api.open-meteo.com/v1/forecast' +
     '?latitude=' + lat + '&longitude=' + lon +
@@ -554,6 +597,10 @@ function fetchWeather(lat, lon) {
           msg.NO2  = Math.round(aqd.current.nitrogen_dioxide || 0);
         }
         msg.Units = units === 'metric' ? 1 : 0;
+        // Already resolved — never 'auto'. Sent alongside Units so the watch's
+        // absent-key fallback (comm.c) and this value can never disagree about
+        // which reading the numbers above are in.
+        msg.WindUnits = WIND_UNIT_CODE[windUnit];
         msg.LastUpdated = Math.floor(Date.now() / 1000);
 
         // Pollen — hybrid strategy:
@@ -1142,6 +1189,12 @@ Pebble.addEventListener('showConfiguration', function() {
 function weatherRelevantSnapshot() {
   return [
     localStorage.getItem('units'),
+    // Load-bearing: the wind unit is applied by the API, not by the watch, so
+    // changing it without a refetch would relabel the SAME numbers — 12 km/h
+    // would redraw as "12M/S", a gale. It also has to stay listed even though
+    // 'auto' derives from units, because switching auto->ms changes the
+    // request while `units` does not move.
+    localStorage.getItem('windUnit'),
     localStorage.getItem('useDewPoint'),
     localStorage.getItem('showLocation'),
     localStorage.getItem('timeFormat'),
@@ -1159,6 +1212,15 @@ Pebble.addEventListener('webviewclosed', function(e) {
     // and silently pinned the app to imperial.
     localStorage.setItem('units',
       parseInt(dict.Units.value, 10) === 1 ? 'metric' : 'imperial');
+  }
+  if (dict.WindSpeedUnit !== undefined) {
+    // Clay select values come back as strings. Whitelist rather than store
+    // verbatim: an unrecognised value would fall through getWindUnitPref() to
+    // 'auto' on read anyway, but it would also reach the Open-Meteo URL from
+    // here and fail the whole forecast request.
+    var wsu = String(dict.WindSpeedUnit.value);
+    localStorage.setItem('windUnit',
+      (wsu === 'mph' || wsu === 'kmh' || wsu === 'ms') ? wsu : 'auto');
   }
   if (dict.UseDewPoint !== undefined) {
     localStorage.setItem('useDewPoint',

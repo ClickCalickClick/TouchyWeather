@@ -1,5 +1,23 @@
 # Deferred: Tier 2 — no fabricated readings on first-ever launch
 
+**Status: DONE, 2026-08-08 — see `UNITS_FLASH_TIER2_IMPLEMENTATION.md`.**
+Kept for the record. Two things below are wrong and were corrected by the work:
+
+1. **The scope table is wrong.** "First-ever launch, no cache" was not the only
+   exposed case. `PERSIST_KEY_CACHE` was bumped on every `WeatherData` layout
+   change (104 → 109), and each bump orphans the user's blob — so no cache
+   loads and the imperial mock reached the first draw **after every app
+   update**. That is why the user report says "occasionally". The key is now
+   pinned with a size + layout-version guard instead.
+2. **The prescribed change would have caused the bug it fixes.** Adding a
+   `state` field grows the struct and forces another key bump. The shipped fix
+   uses the existing `valid` flag and changes no struct.
+
+The open question at the bottom is answered: auto-hide fails open at
+`valid == false`, verified by capture rather than by reading the branch.
+
+**Original text below, unedited.**
+
 **Status:** deferred by decision, 2026-08-07. Do this AFTER the Big Mode round (B)
 and the watchface legibility round (C). Ask before starting.
 

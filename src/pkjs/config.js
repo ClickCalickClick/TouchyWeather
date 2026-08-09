@@ -69,6 +69,19 @@ module.exports = [
         ]
       },
       {
+        "type": "select",
+        "messageKey": "WindSpeedUnit",
+        "label": "Wind speed",
+        "defaultValue": "auto",
+        "description": "Wind can use a different unit from the temperature. Automatic follows the measurement system above (mph with Imperial, km/h with Metric); metres per second is the everyday wind unit across Scandinavia and much of Europe.",
+        "options": [
+          { "label": "Automatic",           "value": "auto" },
+          { "label": "Miles per hour (mph)", "value": "mph" },
+          { "label": "Kilometres per hour (km/h)", "value": "kmh" },
+          { "label": "Metres per second (m/s)",    "value": "ms" }
+        ]
+      },
+      {
         "type": "toggle",
         "messageKey": "UseDewPoint",
         "label": "Show dew point",

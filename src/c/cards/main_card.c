@@ -337,9 +337,8 @@ void card_main_draw(GContext *ctx, GRect bounds) {
     GFont lf = ui_font_label();
 
     char wind_buf[16];
-    const char *wind_unit = (d->units == UNITS_METRIC) ? "KMH" : "MPH";
     snprintf(wind_buf, sizeof(wind_buf), "%d%s %s",
-             d->wind_speed, wind_unit, d->wind_dir);
+             d->wind_speed, wind_unit_label(d), d->wind_dir);
     // Humidity or dew point, per the Clay "Show dew point" switch.
     char hum_buf[8];
     if (d->use_dew_point) {
@@ -535,12 +534,12 @@ void card_main_draw(GContext *ctx, GRect bounds) {
   graphics_context_set_stroke_width(ctx, 1);
   graphics_draw_line(ctx, GPoint(ox + W/2, row_y), GPoint(ox + W/2, row_y + 32));
 
-  // Wind (left column). Speed unit follows the user's selected system.
+  // Wind (left column). Speed unit follows the dedicated wind-unit setting,
+  // NOT `units` — see WindUnits in weather_data.h.
   icon_draw_wind(ctx, GPoint(ox + W/4, row_y + 8), 22, theme_fg());
   char wind_buf[16];
-  const char *wind_unit = (d->units == UNITS_METRIC) ? "KMH" : "MPH";
   snprintf(wind_buf, sizeof(wind_buf), "%d%s %s",
-           d->wind_speed, wind_unit, d->wind_dir);
+           d->wind_speed, wind_unit_label(d), d->wind_dir);
   graphics_context_set_text_color(ctx, theme_fg());
   graphics_draw_text(ctx, wind_buf,
                      ui_font_header(),

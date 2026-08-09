@@ -188,6 +188,36 @@ one feature, so they stay here permanently.
   reading `comm.c:683> Data is 187 secs old (<900 threshold), skipping fetch`, which can only come
   from a blob written by the previous run. Do not "fix" it, and do not re-derive it — the SDK
   header's 256 is documented for strings and is not what the firmware enforces here.
+* **This app has ~400 BYTES of RAM headroom. Code size is the budget.** Pebble
+  loads the whole app image into RAM, so every byte of code comes out of the app
+  heap — and `comm_init()`'s `app_message_open(2048, 256)` needs ~2.3 KB of it.
+  Adding ~430 bytes (eleven copies of a one-line guard) made `app_message_open`
+  return **4096 = `APP_MSG_OUT_OF_MEMORY`**, and the failure does not look like
+  memory: with no inbox open the phone's payload is NAKed *and* the watch's own
+  refresh request goes nowhere, so the app simply never receives weather again.
+  It reproduces 3/3 and is invisible to a build that compiles clean. Check
+  `ls -l build/basalt/pebble-app.bin` against main after any addition; the
+  `Heap Usage for App` line in `pebble logs` is the other tell (2680B broken vs
+  3248B healthy). Prefer one guard at a shared choke point over N copies.
+* **Never bump `PERSIST_KEY_CACHE` (109). It is pinned.** Each of the six
+  historical bumps orphaned the user's cache — the old key is never deleted, so
+  `persist_exists(new)` is false, no cache loads, and whatever
+  `weather_data_init_empty()` left reaches the first draw. That shipped an
+  invented imperial forecast to metric users on every update (the "Week card
+  switches to Fahrenheit" report) and leaks ~480 bytes of the 4 KB persist quota
+  per bump. `prv_load_cache()` validates `persist_get_size()` against
+  `sizeof(WeatherData)` plus a layout-version key; bump `CACHE_LAYOUT_VERSION`
+  for a same-size layout change, never the key.
+* **Nothing may render a WeatherData field while `weather_data_has_reading()` is
+  false** — the struct is zeroed then, and zero is a *claim*: AQI 0 is "GOOD",
+  UV 0 is "LOW", `moon_phase` 0 is NEW, condition 0 is SUNNY. `nav.c`'s
+  `prv_draw_card()` enforces this for every card (Settings and Radar exempt);
+  `detail_modal.c` does the same for all five sheets.
+* **To photograph the pre-first-reading state, set `CAPTURE_NO_DATA = true`** in
+  `src/pkjs/index.js` — the phone then withholds the payload and the state holds
+  indefinitely instead of ending ~1s after launch. `tools/capture_nodata.py`
+  walks it. Distinct from `CAPTURE_MODE`, which serves a fixed synthetic
+  forecast for store shots.
 * Detail sheets open with a long press: `click select --duration 800`.
 * No `timeout` command on macOS. No ImageMagick; PIL is available, and contact sheets are the
   fastest way to review a set.

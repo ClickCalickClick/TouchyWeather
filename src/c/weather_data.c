@@ -3,7 +3,17 @@
 
 static WeatherData s_data;
 
-void weather_data_init_mock(void) {
+#ifdef TW_MOCK_DATA
+// Hardcoded sample forecast, for LAYOUT WORK ONLY — it lets a card be tuned on
+// the emulator without waiting on PKJS. Never compiled into a shipped build:
+// TW_MOCK_DATA is defined nowhere, so this whole function emits no code and
+// cannot move the locked emery/gabbro binaries (tools/lock_guard.py).
+//
+// It used to run unconditionally at startup with valid = true, which is what
+// put an invented imperial forecast on screen for every user whose cache did
+// not load. If you enable it, remember that prv_save_cache() persists anything
+// flagged valid — a mock run will write this fiction into the real cache.
+static void prv_init_mock(void) {
   s_data.temp = 72;
   s_data.feels_like = 75;
   s_data.high = 5;   // shown as ↑5° relative-ish per render
@@ -105,6 +115,34 @@ void weather_data_init_mock(void) {
   // Pollen unknown until PKJS proxy responds; -1 hides the badge.
   s_data.pollen_level = -1;
 }
+#endif  // TW_MOCK_DATA
+
+void weather_data_init_empty(void) {
+  memset(&s_data, 0, sizeof(s_data));
+  // Two fields already have an "unknown" sentinel the cards understand, and
+  // zero is a MEANING for both: rain_alert_min 0 is "rain this minute" (it
+  // would paint a rain pill on every card) and pollen_level 0 is "none",
+  // which is a claim. -1 is the absence of a claim in both.
+  s_data.rain_alert_min = -1;
+  s_data.pollen_level = -1;
+  // Everything else stays zeroed, including:
+  //   valid        — false, so weather_data_has_reading() is false, no card
+  //                  draws a number, and prv_save_cache() refuses to persist
+  //                  this struct over a real cache on a background wakeup.
+  //   last_updated — 0, which glance.c, refresh_sheet.c and the status pill
+  //                  already read as "never fetched" (the pill shows
+  //                  "UPDATED --").
+  //   units        — UNITS_IMPERIAL by value, but it is NOT a default we show:
+  //                  the real units arrive with the payload and are not
+  //                  persisted in settings, so while has_reading() is false no
+  //                  card may print an F/C letter or an MPH/KMH label. There is
+  //                  no honest unit to name before the first reading.
+#ifdef TW_MOCK_DATA
+  prv_init_mock();
+#endif
+}
+
+bool weather_data_has_reading(void) { return s_data.valid; }
 
 WeatherData *weather_data_get(void) { return &s_data; }
 
@@ -114,6 +152,24 @@ const char *uv_label(int uv) {
   if (uv <= 7) return "HIGH";
   if (uv <= 10) return "V.HIGH";
   return "EXTREME";
+}
+
+const char *wind_unit_label(const WeatherData *d) {
+  // "M/S" and not "MS": the slash is what stops it reading as an abbreviation
+  // of something else, and it costs no width that matters — at GOTHIC_14_BOLD
+  // it measures within a pixel of "KMH", so the main card's already-tight
+  // 144px worst case ("12KMH NNW" against 120px usable) is not made worse.
+  //
+  // One packed literal indexed by a shift, rather than a switch or an array of
+  // three pointers. All three labels are 3 chars, so they sit on a 4-byte
+  // stride and the whole function is a shift and an add — no branch table, no
+  // 12-byte pointer array. That is not premature cleverness: the first draft of
+  // this feature cost 120 bytes against ~400 of total headroom, and this is one
+  // of the two edits that bought most of it back.
+  //
+  // Safe to index unguarded ONLY because comm.c clamps wind_units on receipt.
+  static const char k[] = "MPH\0KMH\0M/S";
+  return k + (d->wind_units << 2);
 }
 
 const char *aqi_label(int aqi) {

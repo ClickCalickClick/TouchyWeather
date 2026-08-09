@@ -122,15 +122,23 @@ int ui_header_height(void) { return 24; }  // uniform across all screen classes
 // read the same pad_bottom table and the same Big-Mode banner height. If that
 // function's geometry changes, change it here too — a screenshot will show the
 // drift immediately as a gap or an overlap at the bottom of every card.
-#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
-int ui_status_pill_top(GRect bounds) {
+// Pill top for EVERY screen class. ui_status_pill_top() below is the small-class
+// public face of this; ui_draw_awaiting_data() needs the same number on the
+// large classes too, and a second copy of the pad table is exactly the kind of
+// duplicated helper that has already produced three separate defects here.
+static int prv_pill_top(GRect bounds) {
 #if defined(UI_SCREEN_SMALL_ROUND)
   const int pad_bottom = 18;
 #else
-  const int pad_bottom = 20;
+  const int pad_bottom = PBL_IF_ROUND_ELSE(35, 20);
 #endif
   const int banner_h = settings_get_big_mode() ? 28 : 22;
   return bounds.origin.y + bounds.size.h - pad_bottom - banner_h;
+}
+
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+int ui_status_pill_top(GRect bounds) {
+  return prv_pill_top(bounds);
 }
 
 int ui_content_bottom(GRect bounds) {
@@ -336,6 +344,43 @@ void ui_draw_card_header_with_icon(GContext *ctx, GRect bounds,
       GRect(start_x + icon_size + gap, bounds.origin.y + y,
             tsize.w + 4, UI_HEADER_HEIGHT),
       GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+}
+
+void ui_draw_awaiting_data(GContext *ctx, GRect bounds) {
+  GFont tf = ui_font_header();
+  GFont sf = ui_font_caption();
+  const char *title = "NO DATA YET";
+  // Word-wrapped rather than sized per screen class: at GOTHIC_14 this measures
+  // ~119px against the 120px the 144 class has usable, so a single line is a
+  // coin flip on the tightest platform. Wrapping lets the small classes break it
+  // and the large ones keep it on one line, with no per-class table to drift.
+  const char *sub = "WAITING FOR PHONE";
+
+  const int usable = bounds.size.w - 2 * UI_MARGIN_X;
+  const int x = bounds.origin.x + UI_MARGIN_X;
+  GSize ts = graphics_text_layout_get_content_size(title, tf,
+      GRect(0, 0, usable, 40), GTextOverflowModeWordWrap, GTextAlignmentCenter);
+  GSize ss = graphics_text_layout_get_content_size(sub, sf,
+      GRect(0, 0, usable, 60), GTextOverflowModeWordWrap, GTextAlignmentCenter);
+
+  // Center the pair in the band the card actually owns: below its header, above
+  // the status pill. Both ends are real geometry, so this lands correctly on
+  // every class and in Big Mode without a per-card offset.
+  const int band_top = bounds.origin.y + UI_HEADER_Y + UI_HEADER_HEIGHT;
+  const int band_bottom = prv_pill_top(bounds) - 4;
+  const int gap = 4;
+  int y = band_top + (band_bottom - band_top - (ts.h + gap + ss.h)) / 2;
+  if (y < band_top) y = band_top;
+
+  graphics_context_set_text_color(ctx, theme_fg());
+  graphics_draw_text(ctx, title, tf, GRect(x, y, usable, ts.h + 4),
+                     GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
+  // theme_secondary(), not theme_muted(): muted is LightGray on the light
+  // theme's white and is unreadable as text (it is for tracks and dividers).
+  // secondary also collapses to fg in Big Mode, which is what that mode wants.
+  graphics_context_set_text_color(ctx, theme_secondary());
+  graphics_draw_text(ctx, sub, sf, GRect(x, y + ts.h + gap, usable, ss.h + 4),
+                     GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
 }
 
 void ui_draw_dotted_hline(GContext *ctx, int x1, int x2, int y, GColor color) {
