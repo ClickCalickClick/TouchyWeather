@@ -1073,6 +1073,19 @@ static void prv_update(Layer *layer, GContext *ctx) {
   graphics_draw_line(ctx, GPoint(0, 0), GPoint(b.size.w, 0));
 #endif
 
+  // Every sheet is a deeper view of a reading — an hourly temperature trend, a
+  // per-day page, a pollutant breakdown. With no reading there is nothing to go
+  // deeper into, and each chart would plot a run of zeros as if measured. One
+  // guard here covers all five, since this is the only place they are drawn.
+  //
+  // The sheet still OPENS rather than refusing the long press: a gesture that
+  // silently does nothing reads as a broken button, and the panel explains the
+  // state the card behind it is already in.
+  if (!weather_data_has_reading()) {
+    ui_draw_awaiting_data(ctx, b);
+    return;
+  }
+
   switch (s_type) {
     case DETAIL_HOURS:  prv_draw_hours(ctx);  break;
     case DETAIL_PRECIP: prv_draw_precip(ctx); break;

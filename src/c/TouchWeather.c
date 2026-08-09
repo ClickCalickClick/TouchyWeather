@@ -406,7 +406,7 @@ static void prv_window_unload(Window *window) {
 static void prv_init(void) {
   theme_init();
   settings_load();
-  weather_data_init_mock();
+  weather_data_init_empty();
 
   // Load cached data BEFORE first window draw to prevent units flash.
   // The callback must be set first so comm_load_cache() can trigger a redraw.
@@ -453,7 +453,7 @@ int main(void) {
     app_log(APP_LOG_LEVEL_INFO, __FILE_NAME__, 413, "Launched from wakeup");
 
     // Initialize weather data structure (required for cache writes)
-    weather_data_init_mock();
+    weather_data_init_empty();
 
     // Load settings to check interval
     settings_load();

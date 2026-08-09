@@ -137,5 +137,17 @@ void ui_draw_card_header_with_icon(GContext *ctx, GRect bounds,
                                    int y, int icon_size,
                                    UIIconDrawFn draw_icon);
 
+// The shared "we have no reading yet" panel: a centered NO DATA YET / WAITING
+// FOR PHONE pair, drawn in the band a card's content would occupy, between the
+// header row and the status pill.
+//
+// Callers are nav.c's prv_draw_card() — which substitutes this for ANY card
+// while weather_data_has_reading() is false — and detail_modal.c, for all five
+// sheets. Cards do not call it themselves; see the note in prv_draw_card() for
+// why the guard is central (RAM) rather than one copy per card. A card that
+// instead printed its zeroed fields would be inventing a forecast: a 0° week,
+// "GOOD" air quality, a new moon.
+void ui_draw_awaiting_data(GContext *ctx, GRect bounds);
+
 void ui_draw_dotted_hline(GContext *ctx, int x1, int x2, int y, GColor color);
 

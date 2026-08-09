@@ -2,6 +2,8 @@
 #include "theme.h"
 #include "settings.h"
 #include "ui.h"
+#include "weather_data.h"
+#include "cards/cards.h"
 // ui_band_w(), for chord-clamping the page-dot strip on chalk. Fully guarded to
 // the small classes inside the header, so emery and gabbro compile no new code.
 #include "ui_layout.h"
@@ -123,6 +125,41 @@ static void prv_start_transition(int new_idx, int dir) {
 
 bool nav_is_transitioning(void) { return s_anim_active; }
 
+// Draw one card, or the "no reading yet" panel in its place.
+//
+// The guard lives HERE, at the single point every card is drawn, rather than
+// as a copy at the top of each card_*_draw. Two reasons, and the first is the
+// one that decided it.
+//
+// RAM. Pebble loads the whole app image into RAM, so code size comes straight
+// out of the app heap, and comm_init()'s app_message_open(2048, 256) needs
+// ~2.3 KB of it. This app ships with roughly 400 bytes of headroom on the
+// 144px platforms: eleven copies of this guard measured ~300 bytes and pushed
+// app_message_open() to APP_MSG_OUT_OF_MEMORY (4096), which opens no inbox at
+// all — the phone's payload was NAKed and the watch's own refresh request went
+// nowhere, so the app could never receive weather again. Measured on basalt,
+// 3/3 against 3/3 clean. Anything added to this app is a withdrawal from that
+// 400 bytes; check `ls -l build/basalt/pebble-app.bin` against main.
+//
+// Correctness. A card added later inherits the guard instead of needing
+// someone to remember it, which is what "never show fabricated weather"
+// actually requires.
+//
+// Settings and Radar are exempt: neither reads WeatherData for its content
+// (Radar fetches its own tiles and draws its own progress state), so both are
+// still truthful with no reading.
+static void prv_draw_card(int idx, GContext *ctx, GRect b) {
+  if (idx < 0 || idx >= s_card_count || !s_cards[idx].draw) return;
+  CardDrawFn fn = s_cards[idx].draw;
+  if (!weather_data_has_reading() &&
+      fn != card_settings_draw && fn != card_radar_draw) {
+    ui_draw_awaiting_data(ctx, b);
+    ui_draw_status_banner(ctx, b, STATUS_BANNER_UPDATED, -1, 0);
+    return;
+  }
+  fn(ctx, b);
+}
+
 static void card_layer_update(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
   graphics_context_set_fill_color(ctx, theme_bg());
@@ -147,20 +184,12 @@ static void card_layer_update(Layer *layer, GContext *ctx) {
     GRect from_b = bounds; from_b.origin.x = bounds.origin.x + from_dx;
     GRect to_b   = bounds; to_b.origin.x   = bounds.origin.x + to_dx;
 
-    if (s_anim_from_idx >= 0 && s_anim_from_idx < s_card_count &&
-        s_cards[s_anim_from_idx].draw) {
-      s_cards[s_anim_from_idx].draw(ctx, from_b);
-    }
-    if (s_anim_to_idx >= 0 && s_anim_to_idx < s_card_count &&
-        s_cards[s_anim_to_idx].draw) {
-      s_cards[s_anim_to_idx].draw(ctx, to_b);
-    }
+    prv_draw_card(s_anim_from_idx, ctx, from_b);
+    prv_draw_card(s_anim_to_idx, ctx, to_b);
     return;
   }
 
-  if (s_current >= 0 && s_current < s_card_count && s_cards[s_current].draw) {
-    s_cards[s_current].draw(ctx, bounds);
-  }
+  prv_draw_card(s_current, ctx, bounds);
 }
 
 static void indicator_layer_update(Layer *layer, GContext *ctx) {
