@@ -2,7 +2,12 @@
 #include "theme.h"
 #include "icons.h"
 #include "settings.h"
+// ui_band_w(), for the status pill's chord clamp on chalk. Every declaration in
+// this header sits inside the same small-class guard the call sites do, so on
+// emery and gabbro it contributes no code and the translation unit is unmoved.
+#include "ui_layout.h"
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 
 // --- Font role accessors (Phase 3.1 Stage A + Phase 5 screen class + Stage B scale) ---
@@ -111,6 +116,38 @@ int ui_header_y(void) {
 }
 int ui_header_height(void) { return 24; }  // uniform across all screen classes
 
+// --- Status-pill geometry (small classes only; see ui.h) ---
+//
+// Kept in lockstep with ui_draw_status_banner() below by construction: both
+// read the same pad_bottom table and the same Big-Mode banner height. If that
+// function's geometry changes, change it here too — a screenshot will show the
+// drift immediately as a gap or an overlap at the bottom of every card.
+// Pill top for EVERY screen class. ui_status_pill_top() below is the small-class
+// public face of this; ui_draw_awaiting_data() needs the same number on the
+// large classes too, and a second copy of the pad table is exactly the kind of
+// duplicated helper that has already produced three separate defects here.
+static int prv_pill_top(GRect bounds) {
+#if defined(UI_SCREEN_SMALL_ROUND)
+  const int pad_bottom = 18;
+#else
+  const int pad_bottom = PBL_IF_ROUND_ELSE(35, 20);
+#endif
+  const int banner_h = settings_get_big_mode() ? 28 : 22;
+  return bounds.origin.y + bounds.size.h - pad_bottom - banner_h;
+}
+
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+int ui_status_pill_top(GRect bounds) {
+  return prv_pill_top(bounds);
+}
+
+int ui_content_bottom(GRect bounds) {
+  // 4 px of air so descenders and degree rings don't kiss the pill's edge —
+  // "61°" merging into the pill outline was a real Big-Mode defect.
+  return ui_status_pill_top(bounds) - 4;
+}
+#endif
+
 static void prv_format_ago(uint32_t when, char *out, size_t n) {
   if (!when) { snprintf(out, n, "UPDATED --"); return; }
   uint32_t now = (uint32_t)time(NULL);
@@ -121,6 +158,45 @@ static void prv_format_ago(uint32_t when, char *out, size_t n) {
   else if (delta < 24 * 60 * 60) snprintf(out, n, "UPDATED %luH AGO", (unsigned long)(delta / 3600));
   else                          snprintf(out, n, "UPDATED %luD AGO", (unsigned long)(delta / 86400));
 }
+
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+// Shrink the pill's label until it fits the pill.
+//
+// Clamping banner_w (below) also shrinks its inner text box — to ~108px on
+// SMALL_RECT and ~104px on chalk, where the strings were written against
+// 118/128 — and Big Mode independently promotes ui_font_label() to
+// GOTHIC_18_BOLD, at which "UPDATED 59M AGO" measures far past either. The draw
+// call's GTextOverflowModeTrailingEllipsis would resolve that by eating the
+// tail, i.e. by deleting the number: "UPDATED 5…" is a pill that has lost the
+// one thing it exists to say.
+//
+// So drop words instead of characters, least informative first: " AGO" (the
+// tense is already carried by "UPDATED"), then the "UPDATED " prefix itself.
+// Measured at each step rather than switched on Big Mode, because the same
+// cascade then also covers the 14px path's marginal cases, three-digit deltas
+// and the RAIN wording — one policy instead of a second set of constants to
+// keep in sync with the first. This is the Phase-4 Hours cascade in miniature.
+static bool prv_pill_text_fits(const char *s, int inner_w) {
+  GSize sz = graphics_text_layout_get_content_size(
+      s, ui_font_label(), GRect(0, 0, 200, 40),
+      GTextOverflowModeFill, GTextAlignmentLeft);
+  return sz.w <= inner_w;
+}
+
+static void prv_fit_pill_text(char *buf, int inner_w) {
+  if (inner_w <= 0 || prv_pill_text_fits(buf, inner_w)) return;
+  char *ago = strstr(buf, " AGO");
+  if (ago) {
+    *ago = '\0';
+    if (prv_pill_text_fits(buf, inner_w)) return;
+  }
+  const char *prefix = "UPDATED ";
+  size_t plen = strlen(prefix);
+  if (strncmp(buf, prefix, plen) == 0) {
+    memmove(buf, buf + plen, strlen(buf + plen) + 1);
+  }
+}
+#endif
 
 bool ui_draw_status_banner(GContext *ctx, GRect bounds,
                            StatusBannerMode mode,
@@ -146,6 +222,29 @@ bool ui_draw_status_banner(GContext *ctx, GRect bounds,
   bool big = settings_get_big_mode();
   int banner_h = big ? 28 : 22;
   int banner_w = PBL_IF_ROUND_ELSE(140, 130) + (big ? 20 : 0);
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  // The widths above are the large classes'. On the small ones they are wider
+  // than the screen can carry, in two different ways:
+  //
+  //   * SMALL_RECT: 130 on a 144px screen leaves 7px gutters against every
+  //     card's own 12px margin, so the pill reads as wider than the content it
+  //     belongs to (#70) — and in Big Mode 130+20 = 150 on 144 puts the origin
+  //     at x=-3 and cuts BOTH rounded ends flat against the screen edge (#71).
+  //   * SMALL_ROUND: 140 is a straight rect on a 180px circle. At the pill's
+  //     lower edge the chord is only ~108px, so ~16px spilled past the glass on
+  //     each side and the ends rendered flat (#18/#72).
+  //
+  // ui_band_w() answers both: the class inset on rect (144-24 = 120, which is
+  // exactly the card margin the pill was violating) and the inscribed chord on
+  // round. It is measured at the band's vertical CENTER, which is right here
+  // rather than merely convenient — the pill is a stadium, so its corners are
+  // pulled in by banner_h/2 and its widest ink is the middle row this measures.
+  {
+    int pill_y = bounds.origin.y + bounds.size.h - pad_bottom - banner_h;
+    int band = ui_band_w(bounds, pill_y, banner_h);
+    if (banner_w > band) banner_w = band;
+  }
+#endif
   GRect r = GRect(bounds.origin.x + (bounds.size.w - banner_w) / 2,
                   bounds.origin.y + bounds.size.h - pad_bottom - banner_h,
                   banner_w, banner_h);
@@ -160,8 +259,14 @@ bool ui_draw_status_banner(GContext *ctx, GRect bounds,
   GColor pill_bg = (mode == STATUS_BANNER_RAIN)
                    ? theme_accent_orange()
                    : theme_muted();
+  // The rain pill's text is black because the accent under it is normally
+  // chrome yellow. Big Mode breaks that assumption: its high-contrast policy
+  // collapses theme_accent_orange() to theme_fg(), so the pill becomes a solid
+  // fg block and black text disappears into it on the light theme (the whole
+  // "RAIN IN 30M" alert rendered as an empty slab for half of every toggle
+  // cycle). Invert with the pill there, exactly as the PBL_BW branch above.
   GColor txt_color = (mode == STATUS_BANNER_RAIN)
-                     ? GColorBlack
+                     ? (big ? theme_bg() : GColorBlack)
                      : theme_fg();
 #endif
 
@@ -180,6 +285,10 @@ bool ui_draw_status_banner(GContext *ctx, GRect bounds,
   } else {
     prv_format_ago(last_updated_secs, buf, sizeof(buf));
   }
+
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  prv_fit_pill_text(buf, r.size.w - 12);
+#endif
 
   graphics_context_set_text_color(ctx, txt_color);
   GRect tr = GRect(r.origin.x + 6, r.origin.y + 2, r.size.w - 12, banner_h - 2);
@@ -235,6 +344,43 @@ void ui_draw_card_header_with_icon(GContext *ctx, GRect bounds,
       GRect(start_x + icon_size + gap, bounds.origin.y + y,
             tsize.w + 4, UI_HEADER_HEIGHT),
       GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+}
+
+void ui_draw_awaiting_data(GContext *ctx, GRect bounds) {
+  GFont tf = ui_font_header();
+  GFont sf = ui_font_caption();
+  const char *title = "NO DATA YET";
+  // Word-wrapped rather than sized per screen class: at GOTHIC_14 this measures
+  // ~119px against the 120px the 144 class has usable, so a single line is a
+  // coin flip on the tightest platform. Wrapping lets the small classes break it
+  // and the large ones keep it on one line, with no per-class table to drift.
+  const char *sub = "WAITING FOR PHONE";
+
+  const int usable = bounds.size.w - 2 * UI_MARGIN_X;
+  const int x = bounds.origin.x + UI_MARGIN_X;
+  GSize ts = graphics_text_layout_get_content_size(title, tf,
+      GRect(0, 0, usable, 40), GTextOverflowModeWordWrap, GTextAlignmentCenter);
+  GSize ss = graphics_text_layout_get_content_size(sub, sf,
+      GRect(0, 0, usable, 60), GTextOverflowModeWordWrap, GTextAlignmentCenter);
+
+  // Center the pair in the band the card actually owns: below its header, above
+  // the status pill. Both ends are real geometry, so this lands correctly on
+  // every class and in Big Mode without a per-card offset.
+  const int band_top = bounds.origin.y + UI_HEADER_Y + UI_HEADER_HEIGHT;
+  const int band_bottom = prv_pill_top(bounds) - 4;
+  const int gap = 4;
+  int y = band_top + (band_bottom - band_top - (ts.h + gap + ss.h)) / 2;
+  if (y < band_top) y = band_top;
+
+  graphics_context_set_text_color(ctx, theme_fg());
+  graphics_draw_text(ctx, title, tf, GRect(x, y, usable, ts.h + 4),
+                     GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
+  // theme_secondary(), not theme_muted(): muted is LightGray on the light
+  // theme's white and is unreadable as text (it is for tracks and dividers).
+  // secondary also collapses to fg in Big Mode, which is what that mode wants.
+  graphics_context_set_text_color(ctx, theme_secondary());
+  graphics_draw_text(ctx, sub, sf, GRect(x, y + ts.h + gap, usable, ss.h + 4),
+                     GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
 }
 
 void ui_draw_dotted_hline(GContext *ctx, int x1, int x2, int y, GColor color) {

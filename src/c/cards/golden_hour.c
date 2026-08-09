@@ -144,6 +144,80 @@ void card_golden_hour_draw(GContext *ctx, GRect bounds) {
                                 theme_fg(),
                                 header_y, 18, icon_draw_horizon_sun);
 
+  // Small classes (144x168 / 180x180): the chronological 4-row list needs
+  // 4 x 26px below the header, which put its LAST row (evening blue hour)
+  // underneath the status pill — a card whose entire purpose is four times
+  // showed three (#36). Re-flow to the 2x2 AM/PM grid the Big Mode path above
+  // already proved on this hardware: rows = BLUE/GOLD, columns = AM/PM. Two
+  // rows of 26px clear the pill with room to spare and all four milestones
+  // stay visible. The BLUE/GOLD word column goes with the list (#38): it cost
+  // ~46px of a 120px line, and the AM/PM headers plus the chip already say
+  // which cell is which.
+  //
+  // Band identity is carried by SHAPE as well as hue — filled chip = blue
+  // hour, outlined chip = golden hour. That is the 1-bit fix (#37, pulled
+  // forward from Phase 5/D6): on diorite and flint theme_accent_blue() and
+  // theme_accent_orange() both collapse to theme_fg(), so the two chips
+  // rendered as identical solid black rectangles and the column carried no
+  // information at all. Colour platforms keep the hue on top of the shape.
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  char am_t[2][8], pm_t[2][8];
+  prv_strip_ampm(d->blue_am, am_t[0], sizeof(am_t[0]));  // blue row, AM col
+  prv_strip_ampm(d->blue_pm, pm_t[0], sizeof(pm_t[0]));  // blue row, PM col
+  prv_strip_ampm(d->gold_am, am_t[1], sizeof(am_t[1]));  // gold row, AM col
+  prv_strip_ampm(d->gold_pm, pm_t[1], sizeof(pm_t[1]));  // gold row, PM col
+
+  GFont grid_font = ui_font_header();   // 18B — two times per row
+  GFont col_font  = ui_font_caption();  // AM/PM column headers
+  int chip = 14, gap = 6, colgap = 12, th = 26;
+  int hdr_y = header_y + UI_HEADER_HEIGHT + 8;
+#if defined(UI_SCREEN_SMALL_RECT)
+  int row1_y = 62, row2_y = 90;   // row2 ink bottom 116 vs pill top 126
+#else
+  int row1_y = 76, row2_y = 104;  // chalk: bottom 130 vs pill top 140
+#endif
+
+  // Uniform time-column width across all four cells so the columns align.
+  int time_w = 0;
+  for (int r = 0; r < 2; ++r) {
+    GSize a = graphics_text_layout_get_content_size(am_t[r], grid_font,
+        GRect(0, 0, W, 30), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+    if (a.w > time_w) time_w = a.w;
+    GSize p = graphics_text_layout_get_content_size(pm_t[r], grid_font,
+        GRect(0, 0, W, 30), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+    if (p.w > time_w) time_w = p.w;
+  }
+  int cluster_w = chip + gap + time_w + colgap + time_w;
+  int cluster_x = ox + (W - cluster_w) / 2;
+  int floor_x = ox + UI_MARGIN_X;
+  if (cluster_x < floor_x) cluster_x = floor_x;
+  int am_x = cluster_x + chip + gap;
+  int pm_x = am_x + time_w + colgap;
+
+  graphics_context_set_text_color(ctx, theme_secondary());
+  graphics_draw_text(ctx, "AM", col_font, GRect(am_x, hdr_y, time_w + 4, 18),
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+  graphics_draw_text(ctx, "PM", col_font, GRect(pm_x, hdr_y, time_w + 4, 18),
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+
+  for (int r = 0; r < 2; ++r) {
+    int y = (r == 0) ? row1_y : row2_y;
+    GRect chip_r = GRect(cluster_x, y + (th - chip) / 2, chip, chip);
+    if (r == 0) {  // blue hour — filled chip
+      graphics_context_set_fill_color(ctx, theme_accent_blue());
+      graphics_fill_rect(ctx, chip_r, 2, GCornersAll);
+    } else {       // golden hour — outlined chip
+      graphics_context_set_stroke_color(ctx, theme_accent_orange());
+      graphics_context_set_stroke_width(ctx, 2);
+      graphics_draw_rect(ctx, chip_r);
+    }
+    graphics_context_set_text_color(ctx, theme_fg());
+    graphics_draw_text(ctx, am_t[r], grid_font, GRect(am_x, y, time_w + 4, th),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+    graphics_draw_text(ctx, pm_t[r], grid_font, GRect(pm_x, y, time_w + 4, th),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+  }
+#else
   // Build the 4 rows in chronological order. The "swatch" is the small
   // colored pill drawn before the label to communicate band identity.
   GHRow rows[4] = {
@@ -199,6 +273,7 @@ void card_golden_hour_draw(GContext *ctx, GRect bounds) {
         GRect(time_x, y, time_w + 4, 22),
         GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
   }
+#endif
 
   ui_draw_auto_banner(ctx, bounds, d->rain_alert_min, d->last_updated,
                       anim_get_frame());

@@ -7,6 +7,22 @@
 #include "../anim.h"
 #include <stdio.h>
 
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+static int prv_clamp_peak_y(GRect bounds, int y) {
+  // Reserve the whole 18px box, not just the ink: at the shipped geometry the
+  // box bottom lands exactly on the pill (c.y + 24 + 18 == 126), which leaves
+  // the ink 4px of air and the layout none at all. Clamping to the ink height
+  // computes to a no-op here — it would only catch a collision after one had
+  // already happened — so reserve the box and PEAK gains real clearance.
+  // -16 balances the row between its two neighbours: reserving the full 18px box
+  // bought 8px above the pill but squeezed the gap to "LOW" from 6px to 2, which
+  // just moves the crowding. At 16 the row sits ~6px off the pill and ~3px off
+  // the label above it.
+  int max_y = ui_content_bottom(bounds) - 16;
+  return (y > max_y) ? max_y : y;
+}
+#endif
+
 void card_uv_draw(GContext *ctx, GRect bounds) {
   WeatherData *d = weather_data_get();
   int W = bounds.size.w;
@@ -100,7 +116,11 @@ void card_uv_draw(GContext *ctx, GRect bounds) {
   // Big number inside. Small classes lift the number box and tighten the
   // label/PEAK offsets so all three clear the shrunken gauge and the banner.
 #if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
-  int num_top = c.y - 38, num_h = 44, label_dy = 6, peak_dy = 24;
+  // #47: the numeral box starts inside the 10px arc band. Measured, the ink
+  // clears the arc's inner edge by 1px rather than overlapping it as the
+  // register states — but 1px is not clearance, it is a coincidence. 2px down
+  // balances it against the label below (which had 5px), giving ~3px each way.
+  int num_top = c.y - 36, num_h = 44, label_dy = 6, peak_dy = 24;
 #else
   int num_top = c.y - 32, num_h = 50, label_dy = 18, peak_dy = 38;
 #endif
@@ -126,7 +146,15 @@ void card_uv_draw(GContext *ctx, GRect bounds) {
     graphics_context_set_text_color(ctx, theme_secondary());
     graphics_draw_text(ctx, peak_buf,
         ui_font_caption(),
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+        // #44 — PEAK is the card's last line and its box bottom landed exactly
+        // on the pill's top edge (c.y + 24 + 18 == 126 on SMALL_RECT). It reads
+        // as touching, and any font or pill change makes it a collision. Clamp
+        // it to the reserved content area rather than trusting the arithmetic.
+        GRect(ox, prv_clamp_peak_y(bounds, c.y + peak_dy), W, 18),
+#else
         GRect(ox, c.y + peak_dy, W, 18),
+#endif
         GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
   }
 

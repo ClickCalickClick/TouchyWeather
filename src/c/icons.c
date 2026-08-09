@@ -1,4 +1,36 @@
 #include "icons.h"
+#include "theme.h"
+// Screen-class macros for the header-glyph tuning below. ui.h is declarations
+// and macros only, so the locked pair compiles no new code from this include.
+#include "ui.h"
+
+// Condition-icon palette. On 1-bit displays (diorite/flint) the hardcoded
+// accents quantize by luminance: ChromeYellow and VividCerulean both reduce
+// to white, so the sun/clear glyph and the rain drops disappear entirely on
+// the light theme, and the icon appears to move between themes. Remap to
+// theme-aware fg/muted there so every condition stays visible in both
+// themes. Color platforms keep the original constants.
+//
+// Fog is the one condition drawn from strokes alone, and a stroke does not
+// dither: theme_muted() quantizes to the *background* in both themes
+// (LightGray->white on light, DarkGray->black on dark), so sharing
+// ICON_CLOUD_COLOR erased the glyph entirely. theme_secondary() is the
+// inverse pair, so it quantizes to the foreground in both.
+#if defined(PBL_BW)
+#define ICON_SUN_COLOR   (theme_fg())
+#define ICON_CLOUD_COLOR (theme_muted())
+#define ICON_DROP_COLOR  (theme_fg())
+#define ICON_BOLT_COLOR  (theme_fg())
+#define ICON_STORM_CLOUD (theme_muted())
+#define ICON_FOG_COLOR   (theme_secondary())
+#else
+#define ICON_SUN_COLOR   GColorChromeYellow
+#define ICON_CLOUD_COLOR GColorLightGray
+#define ICON_DROP_COLOR  GColorVividCerulean
+#define ICON_BOLT_COLOR  GColorChromeYellow
+#define ICON_STORM_CLOUD GColorDarkGray
+#define ICON_FOG_COLOR   GColorLightGray
+#endif
 
 static void set_stroke(GContext *ctx, GColor color, int w) {
   graphics_context_set_stroke_color(ctx, color);
@@ -111,30 +143,147 @@ void icon_draw_fog(GContext *ctx, GPoint c, int size, GColor color) {
                           GPoint(c.x + half - 2, c.y + gap));
 }
 
-void icon_draw_condition(GContext *ctx, GPoint c, int size,
-                         WeatherCondition cond) {
+#if defined(PBL_BW)
+// --- D6b: a 1-bit silhouette vocabulary (#26, #33, #84, #80) ---
+//
+// Phase 5's colour remap made every condition VISIBLE on 1-bit. It could not
+// make them DISTINGUISHABLE, and the register split those apart for good
+// reason: at the 13-14px the Hours and Week columns use, cloudy / rain / snow /
+// storm all render as the same ~10x9 dithered smudge. Forcing all seven
+// conditions into one screenshot shows only three that read — sunny (a solid
+// disc), partly (disc plus smudge) and fog (solid bars) — and those three read
+// precisely because they differ in FILL, not in detail.
+//
+// So fill-vs-outline becomes the alphabet, which is the only one a 1-bit panel
+// has at this size:
+//
+//     sunny    solid disc
+//     partly   solid disc + hollow cloud
+//     cloudy   hollow cloud
+//     rain     hollow cloud + vertical ticks
+//     snow     hollow cloud + dots
+//     storm    SOLID cloud + bolt      (solid vs hollow separates it from rain)
+//     fog      solid bars
+//
+// "Hollow" is drawn by filling the silhouette and then carving it with the
+// background rather than by stroking a path: a stroked circle overlapping a
+// stroked rect shows its internal seams at this size, while a carve leaves one
+// clean outline of the union. Same technique as the Night Sky header crescent.
+//
+// Applied at every size, not just the small ones. The hero icon's dithered
+// field is #80 — "the worst instance of #15" — and giving it the same
+// vocabulary fixes it and keeps the 1-bit look coherent between the hero and
+// the row icons instead of splitting it into two languages.
+static void prv_bw_cloud(GContext *ctx, GPoint c, int w, int h, bool hollow,
+                         GColor col) {
+  int br = h / 2;
+  int inset = (w >= 28) ? 3 : 2;   // outline weight scales with the glyph
+  GPoint bump = GPoint(c.x, c.y - h / 2 + br);
+  GRect base = GRect(c.x - w / 2, c.y - h / 2 + br, w, h - br);
+  graphics_context_set_fill_color(ctx, col);
+  graphics_fill_circle(ctx, bump, br);
+  graphics_fill_rect(ctx, base, 2, GCornersAll);
+  if (hollow) {
+    graphics_context_set_fill_color(ctx, theme_bg());
+    graphics_fill_circle(ctx, bump, br - inset);
+    graphics_fill_rect(ctx, GRect(base.origin.x + inset, base.origin.y,
+                                  base.size.w - 2 * inset,
+                                  base.size.h - inset),
+                       1, GCornersAll);
+  }
+}
+
+static void prv_bw_condition(GContext *ctx, GPoint c, int size,
+                             WeatherCondition cond) {
+  const GColor fg = theme_fg();
+  const int r = size / 2;
+  const int cw = size;            // cloud width
+  const int ch = (size * 5) / 8;  // cloud height
   switch (cond) {
     case COND_SUNNY:
-      icon_draw_sun(ctx, c, size, GColorChromeYellow); break;
+      graphics_context_set_fill_color(ctx, fg);
+      graphics_fill_circle(ctx, c, r - 1);
+      break;
+    case COND_PARTLY_CLOUDY:
+      // Solid cloud here, hollow for CLOUDY: at 3/4 scale the carve is too
+      // small to read as an outline, and disc+solid vs outline-only is a
+      // stronger pair than two near-identical outlines anyway.
+      graphics_context_set_fill_color(ctx, fg);
+      graphics_fill_circle(ctx, GPoint(c.x - r / 2, c.y - r / 2), r / 2 + 1);
+      prv_bw_cloud(ctx, GPoint(c.x + size / 8, c.y + size / 8),
+                   cw * 3 / 4, ch * 3 / 4, false, fg);
+      break;
+    case COND_CLOUDY:
+      prv_bw_cloud(ctx, c, cw, ch, true, fg);
+      break;
+    case COND_RAIN: {
+      prv_bw_cloud(ctx, GPoint(c.x, c.y - size / 6), cw, ch, true, fg);
+      // 1px at small sizes: at stroke 2 with size/4 spacing the three ticks
+      // merge into one solid block on a 14px glyph, which reads as a filled
+      // cloud with a tail rather than as rain.
+      graphics_context_set_stroke_color(ctx, fg);
+      graphics_context_set_stroke_width(ctx, (size >= 28) ? 3 : 1);
+      int y0 = c.y + size / 5, y1 = c.y + size / 2 + 1;
+      for (int i = -1; i <= 1; ++i) {
+        int x = c.x + i * (size / 3);
+        graphics_draw_line(ctx, GPoint(x, y0), GPoint(x, y1));
+      }
+      break;
+    }
+    case COND_SNOW: {
+      prv_bw_cloud(ctx, GPoint(c.x, c.y - size / 6), cw, ch, true, fg);
+      // Square pips rather than circles — a radius-1 circle is a single pixel
+      // and vanishes next to rain's ticks; a 2x2 block reads as "not a line".
+      graphics_context_set_fill_color(ctx, fg);
+      int d = (size >= 28) ? 5 : 2;
+      for (int i = -1; i <= 1; ++i) {
+        graphics_fill_rect(ctx, GRect(c.x + i * (size / 3) - d / 2,
+                                      c.y + size / 4, d, d), 0, GCornerNone);
+      }
+      break;
+    }
+    case COND_STORM:
+      // Solid cloud, so it cannot be confused with rain's hollow one. Lifted
+      // further than rain's so the bolt has clear air beneath it instead of
+      // merging into the cloud's lower edge.
+      prv_bw_cloud(ctx, GPoint(c.x, c.y - size / 4), cw, ch * 3 / 4, false, fg);
+      icon_draw_lightning(ctx, GPoint(c.x, c.y + size / 3), size * 2 / 3, fg);
+      break;
+    case COND_FOG:
+      icon_draw_fog(ctx, c, size, fg);
+      break;
+  }
+}
+#endif  // PBL_BW
+
+void icon_draw_condition(GContext *ctx, GPoint c, int size,
+                         WeatherCondition cond) {
+#if defined(PBL_BW)
+  prv_bw_condition(ctx, c, size, cond);
+  return;
+#endif
+  switch (cond) {
+    case COND_SUNNY:
+      icon_draw_sun(ctx, c, size, ICON_SUN_COLOR); break;
     case COND_PARTLY_CLOUDY: {
-      icon_draw_sun(ctx, GPoint(c.x - size/4, c.y - size/4), size*3/4, GColorChromeYellow);
-      icon_draw_cloud(ctx, GPoint(c.x + size/6, c.y + size/8), size*3/4, GColorLightGray);
+      icon_draw_sun(ctx, GPoint(c.x - size/4, c.y - size/4), size*3/4, ICON_SUN_COLOR);
+      icon_draw_cloud(ctx, GPoint(c.x + size/6, c.y + size/8), size*3/4, ICON_CLOUD_COLOR);
       break;
     }
     case COND_CLOUDY:
-      icon_draw_cloud(ctx, c, size, GColorLightGray); break;
+      icon_draw_cloud(ctx, c, size, ICON_CLOUD_COLOR); break;
     case COND_RAIN:
-      icon_draw_cloud_rain(ctx, c, size, GColorLightGray, GColorVividCerulean); break;
+      icon_draw_cloud_rain(ctx, c, size, ICON_CLOUD_COLOR, ICON_DROP_COLOR); break;
     case COND_SNOW:
-      icon_draw_cloud(ctx, GPoint(c.x, c.y - size/6), size*3/4, GColorLightGray);
-      icon_draw_snow(ctx, GPoint(c.x, c.y + size/4), size/2, GColorVividCerulean);
+      icon_draw_cloud(ctx, GPoint(c.x, c.y - size/6), size*3/4, ICON_CLOUD_COLOR);
+      icon_draw_snow(ctx, GPoint(c.x, c.y + size/4), size/2, ICON_DROP_COLOR);
       break;
     case COND_STORM:
-      icon_draw_cloud(ctx, GPoint(c.x, c.y - size/6), size*7/8, GColorDarkGray);
-      icon_draw_lightning(ctx, GPoint(c.x, c.y + size/4), size/2, GColorChromeYellow);
+      icon_draw_cloud(ctx, GPoint(c.x, c.y - size/6), size*7/8, ICON_STORM_CLOUD);
+      icon_draw_lightning(ctx, GPoint(c.x, c.y + size/4), size/2, ICON_BOLT_COLOR);
       break;
     case COND_FOG:
-      icon_draw_fog(ctx, c, size, GColorLightGray); break;
+      icon_draw_fog(ctx, c, size, ICON_FOG_COLOR); break;
   }
 }
 
@@ -260,6 +409,36 @@ static void draw_half_sun_with_rays(GContext *ctx, GPoint c, int size, GColor co
                           GPoint(c.x + d_out, c.y - d_out));
 }
 
+#if defined(PBL_BW)
+// #49 — on 1-bit the arrow carries 100% of the sunrise/sunset distinction.
+//
+// The two glyphs share draw_half_sun_with_rays() and differ only by which end
+// of a short stem gets a chevron whose arms are a hardcoded 3px at stroke 2.
+// On a colour screen that is fine because the sun itself is orange vs blue; on
+// diorite and flint both collapse to theme_fg() and the entire difference
+// between "sunrise" and "sunset" is six pixels pointing one way or the other.
+//
+// A filled triangle head that scales with the glyph reads at a glance where a
+// chevron does not, and it is the same fill-vs-stroke reasoning as the rest of
+// the 1-bit work: a solid shape survives where a thin stroke has to be hunted
+// for. PBL_BW cannot reach emery or gabbro, so the colour glyphs are untouched.
+static void prv_arrow_head(GContext *ctx, GPoint tip, int size, bool up,
+                           GColor color) {
+  int half = size / 4;
+  if (half < 3) half = 3;
+  int dy = up ? half : -half;
+  static GPoint tp[3];
+  tp[0] = tip;
+  tp[1] = GPoint(tip.x - half, tip.y + dy);
+  tp[2] = GPoint(tip.x + half, tip.y + dy);
+  GPathInfo pi = { 3, tp };
+  GPath *g = gpath_create(&pi);
+  graphics_context_set_fill_color(ctx, color);
+  gpath_draw_filled(ctx, g);
+  gpath_destroy(g);
+}
+#endif
+
 void icon_draw_sunrise(GContext *ctx, GPoint c, int size, GColor color) {
   draw_half_sun_with_rays(ctx, c, size, color);
   // Up-arrow under the horizon, centered.
@@ -268,9 +447,13 @@ void icon_draw_sunrise(GContext *ctx, GPoint c, int size, GColor color) {
   int top_y = c.y + 4;
   int bot_y = c.y + 4 + size/3;
   graphics_draw_line(ctx, GPoint(ax, top_y), GPoint(ax, bot_y));
+#if defined(PBL_BW)
+  prv_arrow_head(ctx, GPoint(ax, top_y), size, true, color);
+#else
   // chevron at top pointing up
   graphics_draw_line(ctx, GPoint(ax, top_y), GPoint(ax - 3, top_y + 3));
   graphics_draw_line(ctx, GPoint(ax, top_y), GPoint(ax + 3, top_y + 3));
+#endif
 }
 
 void icon_draw_sunset(GContext *ctx, GPoint c, int size, GColor color) {
@@ -281,15 +464,35 @@ void icon_draw_sunset(GContext *ctx, GPoint c, int size, GColor color) {
   int top_y = c.y + 4;
   int bot_y = c.y + 4 + size/3;
   graphics_draw_line(ctx, GPoint(ax, top_y), GPoint(ax, bot_y));
+#if defined(PBL_BW)
+  prv_arrow_head(ctx, GPoint(ax, bot_y), size, false, color);
+#else
   // chevron at bottom pointing down
   graphics_draw_line(ctx, GPoint(ax, bot_y), GPoint(ax - 3, bot_y - 3));
   graphics_draw_line(ctx, GPoint(ax, bot_y), GPoint(ax + 3, bot_y - 3));
+#endif
 }
 
 void icon_draw_pulse(GContext *ctx, GPoint c, int size, GColor color) {
   set_stroke(ctx, color, 2);
   int w = size;
   int x = c.x - w/2;
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  // #48 — at the header's 18px the shipped trace has THREE excursions
+  // (down, up, down) crammed into ~12px of width, and they merge into a single
+  // angular wedge that reads as a jet or an arrowhead rather than a heartbeat.
+  // One dip and one tall spike, with real flat baseline on both sides, is what
+  // makes an ECG legible at this size. Large classes keep the original trace.
+  GPoint pts[] = {
+    { x,             c.y },
+    { x + w/3,       c.y },
+    { x + w/3 + 2,   c.y + size/5 },
+    { x + w/2,       c.y - size/2 },
+    { x + w/2 + 3,   c.y },
+    { x + 2*w/3,     c.y },
+    { x + w,         c.y },
+  };
+#else
   GPoint pts[] = {
     { x,         c.y },
     { x + w/6,   c.y },
@@ -299,6 +502,7 @@ void icon_draw_pulse(GContext *ctx, GPoint c, int size, GColor color) {
     { x + 2*w/3, c.y },
     { x + w,     c.y },
   };
+#endif
   for (size_t i = 0; i + 1 < sizeof(pts)/sizeof(pts[0]); ++i) {
     graphics_draw_line(ctx, pts[i], pts[i+1]);
   }
@@ -433,33 +637,50 @@ static void icon_draw_fog_animated(GContext *ctx, GPoint c, int size,
 
 void icon_draw_condition_animated(GContext *ctx, GPoint c, int size,
                                   WeatherCondition cond, uint32_t frame) {
+#if defined(PBL_BW)
+  // The hero is a second dispatcher over the same conditions (#80), and leaving
+  // it on the dithered path would have meant the SAME condition rendering as a
+  // solid silhouette in a Hours row and as a borderless dither field in the hero
+  // directly above it. This is the #99 rule — when a defect is fixed in one of
+  // two dispatchers, go and find the other one.
+  //
+  // The rotating sun survives: it is the app's signature and a solid disc with
+  // rays reads perfectly well on 1-bit. Everything else takes the silhouette
+  // vocabulary and gives up its bob, which was never legible at 1-bit anyway.
+  if (cond == COND_SUNNY) {
+    icon_draw_sun_rotating(ctx, c, size, theme_fg(), frame);
+    return;
+  }
+  prv_bw_condition(ctx, c, size, cond);
+  return;
+#endif
   int by = bob_y(frame, 2);
   switch (cond) {
     case COND_SUNNY:
-      icon_draw_sun_rotating(ctx, c, size, GColorChromeYellow, frame); break;
+      icon_draw_sun_rotating(ctx, c, size, ICON_SUN_COLOR, frame); break;
     case COND_PARTLY_CLOUDY: {
       icon_draw_sun_rotating(ctx, GPoint(c.x - size/4, c.y - size/4),
-                             size*3/4, GColorChromeYellow, frame);
+                             size*3/4, ICON_SUN_COLOR, frame);
       icon_draw_cloud(ctx, GPoint(c.x + size/6, c.y + size/8 + by),
-                      size*3/4, GColorLightGray);
+                      size*3/4, ICON_CLOUD_COLOR);
       break;
     }
     case COND_CLOUDY:
-      icon_draw_cloud(ctx, GPoint(c.x, c.y + by), size, GColorLightGray); break;
+      icon_draw_cloud(ctx, GPoint(c.x, c.y + by), size, ICON_CLOUD_COLOR); break;
     case COND_RAIN:
       icon_draw_cloud_rain_animated(ctx, c, size,
-                                    GColorLightGray, GColorVividCerulean, frame);
+                                    ICON_CLOUD_COLOR, ICON_DROP_COLOR, frame);
       break;
     case COND_SNOW:
       icon_draw_snow_animated(ctx, c, size,
-                              GColorLightGray, GColorVividCerulean, frame);
+                              ICON_CLOUD_COLOR, ICON_DROP_COLOR, frame);
       break;
     case COND_STORM:
       icon_draw_storm_animated(ctx, c, size,
-                               GColorDarkGray, GColorChromeYellow, frame);
+                               ICON_STORM_CLOUD, ICON_BOLT_COLOR, frame);
       break;
     case COND_FOG:
-      icon_draw_fog_animated(ctx, c, size, GColorLightGray, frame); break;
+      icon_draw_fog_animated(ctx, c, size, ICON_FOG_COLOR, frame); break;
   }
 }
 

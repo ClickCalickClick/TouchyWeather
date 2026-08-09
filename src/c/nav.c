@@ -2,6 +2,52 @@
 #include "theme.h"
 #include "settings.h"
 #include "ui.h"
+#include "weather_data.h"
+#include "cards/cards.h"
+// ui_band_w(), for chord-clamping the page-dot strip on chalk. Fully guarded to
+// the small classes inside the header, so emery and gabbro compile no new code.
+#include "ui_layout.h"
+
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+// Screen-space y of the page-indicator strip.
+//
+// nav_draw_page_indicator() receives the indicator LAYER's bounds, whose origin
+// is (0,0) — but ui_band_w() measures the chord against the screen circle and
+// therefore needs a screen-absolute row. Rather than recompute the strip's y
+// from a second copy of nav_init()'s expression (the "three files, three pill
+// constants" mistake this whole phase exists to undo), nav_init records the one
+// it actually used.
+static int s_indicator_screen_y = 0;
+#endif
+
+// Inactive page dots on 1-bit.
+//
+// theme_indicator_inactive() is theme_muted(), which theme.c deliberately does
+// NOT collapse on 1-bit precisely so these dots stay distinct from the fg
+// active dot. As a 4x4 FILL that dithers rather than vanishing — so unlike the
+// fog icon (#95) it stays visible — but a 50% checkerboard sampled over 4x4
+// lands on a different pixel parity per dot, so the row renders as ragged,
+// uneven diamonds (#74).
+//
+// This must be theme_fg(), and the near miss is worth recording. The first
+// attempt used theme_secondary(), reasoning from D6's rule 1 — the rule that
+// saved the fog icon, where theme_secondary() quantizes to the foreground while
+// theme_muted() quantizes to the background. That rule is about STROKES. These
+// dots are a FILL, and a fill does not quantize at all: it dithers, whichever
+// grey it is given. Measured on diorite, theme_secondary() came back at 37%
+// coverage against the active dot's 93% — i.e. still a checkerboard, just a
+// darker one, and #74 would have shipped looking fixed.
+//
+// So: the fill-vs-stroke question decides whether a colour dithers, and the
+// muted-vs-secondary question only decides WHICH WAY a stroke quantizes. A fill
+// that must not dither has to be a pure endpoint. Let LENGTH carry the
+// active/inactive distinction instead — a 16px bar against 4px squares, the
+// same solid-vs-shape vocabulary the AQ gauge and the Golden Hour chips use.
+#if defined(PBL_BW)
+#define NAV_DOT_INACTIVE theme_fg()
+#else
+#define NAV_DOT_INACTIVE theme_indicator_inactive()
+#endif
 
 static Card s_cards[NAV_MAX_CARDS];
 static bool s_enabled[NAV_MAX_CARDS];
@@ -79,6 +125,41 @@ static void prv_start_transition(int new_idx, int dir) {
 
 bool nav_is_transitioning(void) { return s_anim_active; }
 
+// Draw one card, or the "no reading yet" panel in its place.
+//
+// The guard lives HERE, at the single point every card is drawn, rather than
+// as a copy at the top of each card_*_draw. Two reasons, and the first is the
+// one that decided it.
+//
+// RAM. Pebble loads the whole app image into RAM, so code size comes straight
+// out of the app heap, and comm_init()'s app_message_open(2048, 256) needs
+// ~2.3 KB of it. This app ships with roughly 400 bytes of headroom on the
+// 144px platforms: eleven copies of this guard measured ~300 bytes and pushed
+// app_message_open() to APP_MSG_OUT_OF_MEMORY (4096), which opens no inbox at
+// all — the phone's payload was NAKed and the watch's own refresh request went
+// nowhere, so the app could never receive weather again. Measured on basalt,
+// 3/3 against 3/3 clean. Anything added to this app is a withdrawal from that
+// 400 bytes; check `ls -l build/basalt/pebble-app.bin` against main.
+//
+// Correctness. A card added later inherits the guard instead of needing
+// someone to remember it, which is what "never show fabricated weather"
+// actually requires.
+//
+// Settings and Radar are exempt: neither reads WeatherData for its content
+// (Radar fetches its own tiles and draws its own progress state), so both are
+// still truthful with no reading.
+static void prv_draw_card(int idx, GContext *ctx, GRect b) {
+  if (idx < 0 || idx >= s_card_count || !s_cards[idx].draw) return;
+  CardDrawFn fn = s_cards[idx].draw;
+  if (!weather_data_has_reading() &&
+      fn != card_settings_draw && fn != card_radar_draw) {
+    ui_draw_awaiting_data(ctx, b);
+    ui_draw_status_banner(ctx, b, STATUS_BANNER_UPDATED, -1, 0);
+    return;
+  }
+  fn(ctx, b);
+}
+
 static void card_layer_update(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
   graphics_context_set_fill_color(ctx, theme_bg());
@@ -103,20 +184,12 @@ static void card_layer_update(Layer *layer, GContext *ctx) {
     GRect from_b = bounds; from_b.origin.x = bounds.origin.x + from_dx;
     GRect to_b   = bounds; to_b.origin.x   = bounds.origin.x + to_dx;
 
-    if (s_anim_from_idx >= 0 && s_anim_from_idx < s_card_count &&
-        s_cards[s_anim_from_idx].draw) {
-      s_cards[s_anim_from_idx].draw(ctx, from_b);
-    }
-    if (s_anim_to_idx >= 0 && s_anim_to_idx < s_card_count &&
-        s_cards[s_anim_to_idx].draw) {
-      s_cards[s_anim_to_idx].draw(ctx, to_b);
-    }
+    prv_draw_card(s_anim_from_idx, ctx, from_b);
+    prv_draw_card(s_anim_to_idx, ctx, to_b);
     return;
   }
 
-  if (s_current >= 0 && s_current < s_card_count && s_cards[s_current].draw) {
-    s_cards[s_current].draw(ctx, bounds);
-  }
+  prv_draw_card(s_current, ctx, bounds);
 }
 
 static void indicator_layer_update(Layer *layer, GContext *ctx) {
@@ -127,6 +200,75 @@ static void indicator_layer_update(Layer *layer, GContext *ctx) {
                           nav_active_enabled_index(),
                           nav_count_enabled());
 }
+
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+
+// Width the strip needs to draw `n` slots, one of which is the active pill.
+static int prv_strip_w(int n, int dot, int gap, int active_w) {
+  return n * dot + (n - 1) * gap + (active_w - dot);
+}
+
+// Small-class page indicator: the same strip, fitted to the width that actually
+// exists at its row.
+//
+// The shipped layout asserts a width instead of measuring one, and on chalk it
+// is badly wrong. With the full carousel enabled (11 cards once radar is carved
+// out) the strip is 116px, but the dots sit at y=166 on a 180px circle, where
+// the inscribed chord is only ~82px — so roughly three dots ran off each end
+// into the bezel (#73). SMALL_RECT is fine at 116 into 120 and this leaves it
+// pixel-identical; the cascade simply never fires there.
+//
+// Cascade, cheapest concession first: tighten the gap, then show a window of
+// the strip centred on the active card. A window is a real loss of information,
+// so the edge slots it hides are marked — the outermost dot on a clipped side
+// draws at half size, the same "there is more this way" idiom as a scroll cue.
+void nav_draw_page_indicator(GContext *ctx, GRect bounds, int active_index, int total) {
+  if (total <= 0) return;
+  // Active dot = pill (16w x 4h, radius 2). Inactive = circle 4x4.
+  const int dot_size = 4;
+  const int active_w = 16;
+  int gap = 6;
+  int shown = total;
+  int first = 0;
+
+  // The dots occupy a 4px band centred in the 8px strip layer; measure the
+  // chord there, not at the layer's edges.
+  int band = ui_band_w(bounds, s_indicator_screen_y + (bounds.size.h - dot_size) / 2,
+                       dot_size);
+
+  if (prv_strip_w(shown, dot_size, gap, active_w) > band) {
+    gap = 4;
+    while (shown > 3 && prv_strip_w(shown, dot_size, gap, active_w) > band) shown--;
+    // Centre the window on the active card, then clamp it inside [0, total).
+    first = active_index - (shown - 1) / 2;
+    if (first < 0) first = 0;
+    if (first + shown > total) first = total - shown;
+  }
+
+  int total_w = prv_strip_w(shown, dot_size, gap, active_w);
+  int x = bounds.origin.x + (bounds.size.w - total_w) / 2;
+  int y = bounds.origin.y + (bounds.size.h - dot_size) / 2;
+
+  for (int i = first; i < first + shown; ++i) {
+    if (i == active_index) {
+      GRect r = GRect(x, y, active_w, dot_size);
+      graphics_context_set_fill_color(ctx, theme_indicator_active());
+      graphics_fill_rect(ctx, r, 2, GCornersAll);
+      x += active_w + gap;
+    } else {
+      // Half-size where the window hides cards beyond this end.
+      bool more = (i == first && first > 0) ||
+                  (i == first + shown - 1 && first + shown < total);
+      int d = more ? 2 : dot_size;
+      GRect r = GRect(x + (dot_size - d) / 2, y + (dot_size - d) / 2, d, d);
+      graphics_context_set_fill_color(ctx, NAV_DOT_INACTIVE);
+      graphics_fill_rect(ctx, r, 2, GCornersAll);
+      x += dot_size + gap;
+    }
+  }
+}
+
+#else
 
 void nav_draw_page_indicator(GContext *ctx, GRect bounds, int active_index, int total) {
   if (total <= 0) return;
@@ -153,6 +295,8 @@ void nav_draw_page_indicator(GContext *ctx, GRect bounds, int active_index, int 
   }
 }
 
+#endif
+
 void nav_init(Window *window) {
   Layer *root = window_get_root_layer(window);
   GRect rb = layer_get_bounds(root);
@@ -173,6 +317,10 @@ void nav_init(Window *window) {
   int indicator_y = rb.size.h - 14;
 #else
   int indicator_y = PBL_IF_ROUND_ELSE(229, rb.size.h - 14);
+#endif
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  // One source of truth for the strip's screen row — see the declaration.
+  s_indicator_screen_y = indicator_y;
 #endif
   GRect ib = GRect(0, indicator_y, rb.size.w, 8);
   s_indicator_layer = layer_create(ib);

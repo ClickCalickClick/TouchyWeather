@@ -2,10 +2,46 @@
 #include "../theme.h"
 #include "../icons.h"
 #include "../ui.h"
+#include "../ui_layout.h"
 #include "../settings.h"
 #include "../weather_data.h"
 #include "../anim.h"
 #include <stdio.h>
+
+// #43 — the header's rain glyph on 1-bit.
+//
+// Both arguments are theme_accent_blue(), which collapses to theme_fg() on a
+// 1-bit panel: a solid foreground cloud with the drops stroked in the SAME ink
+// directly beneath it, i.e. one featureless blob. Phase 5's remap never reached
+// this because its ICON_*_COLOR macros are file-local to icons.c and only wire
+// up the two condition dispatchers — this card draws its own header icon.
+//
+// Same vocabulary that worked there: the cloud is a FILL, so theme_muted()
+// dithers and keeps a readable silhouette, while the drops stay solid fg and
+// read against it.
+//
+// Defined once and used at BOTH call sites. The Big Mode header duplicates this
+// glyph, and a fix that reached only one of them is precisely how #99 survived
+// Phase 5 — when a defect is in duplicated code, grep for the twin.
+// Label boxes overhang the bar pitch by this much on each side.
+//
+// The pitch itself is right — avail_w/n = 24px on SMALL_RECT — and the labels'
+// INK fits inside it: measured on chalk, "Now" is 23px and "+1h".."+4h" are 19.
+// But a box of exactly the pitch still ellipsized "Now" to "N...", because a
+// font's LAYOUT width is wider than its ink (side bearings), and the draw call
+// measures the former. Widen the box past the pitch and let neighbouring boxes
+// overlap: the boxes are centred, so what actually has to clear the margin and
+// the neighbouring label is the ink, and at 23px against a 24px pitch it does.
+// The overhang is why #39 is stated in terms of ink rather than boxes.
+#define PRECIP_LBL_PAD 4
+
+#if defined(PBL_BW)
+#define PRECIP_ICON_CLOUD theme_muted()
+#define PRECIP_ICON_DROP  theme_fg()
+#else
+#define PRECIP_ICON_CLOUD theme_accent_blue()
+#define PRECIP_ICON_DROP  theme_accent_blue()
+#endif
 
 void card_precipitation_draw(GContext *ctx, GRect bounds) {
   WeatherData *d = weather_data_get();
@@ -33,7 +69,7 @@ void card_precipitation_draw(GContext *ctx, GRect bounds) {
     int bsx = ox + (W - btot) / 2;
     icon_draw_cloud_rain(ctx,
         GPoint(bsx + bicon / 2, UI_HEADER_Y + UI_HEADER_HEIGHT / 2),
-        bicon, theme_accent_blue(), theme_accent_blue());
+        bicon, PRECIP_ICON_CLOUD, PRECIP_ICON_DROP);
     graphics_context_set_text_color(ctx, theme_fg());
     graphics_draw_text(ctx, "PRECIPITATION", bhf,
         GRect(bsx + bicon + bgap, UI_HEADER_Y, bts.w + 4, UI_HEADER_HEIGHT),
@@ -100,7 +136,7 @@ void card_precipitation_draw(GContext *ctx, GRect bounds) {
   int start_x = ox + (W - total_w) / 2;
   icon_draw_cloud_rain(ctx,
       GPoint(start_x + icon_w/2, header_y + UI_HEADER_HEIGHT/2),
-      icon_w, theme_accent_blue(), theme_accent_blue());
+      icon_w, PRECIP_ICON_CLOUD, PRECIP_ICON_DROP);
   graphics_context_set_text_color(ctx, theme_fg());
   graphics_draw_text(ctx, label, hf,
       GRect(start_x + icon_w + gap, header_y, tsize.w + 4, UI_HEADER_HEIGHT),
@@ -113,10 +149,35 @@ void card_precipitation_draw(GContext *ctx, GRect bounds) {
   // and indicator are unchanged).
   const int n = 5;
   int chart_top = header_y + UI_HEADER_HEIGHT + 10;
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  // Both the chart's floor and the bars' width were the large classes' numbers.
+  //
+  // Vertically, `H - 86` is gabbro's constant. On chalk it put the chart floor
+  // at 94 with the pill at 140, so a 100%-probability bar was 18px tall while
+  // 26px of the card sat empty underneath it (#41). Derive the floor from the
+  // pill instead, leaving exactly the hour-label row between them: chalk's
+  // chart goes 36px -> 60px, and rect's 60 -> 62.
+  //
+  // Horizontally, 5x22+4x6 = 134 on a 144px screen starts the block at x=5 and
+  // runs to 139, against the card's 12px margin (#39) — and the hour labels
+  // overhang the bars, so the real ink went to x=1. Solve for the width that
+  // exists at the LABEL row (the lowest, and on chalk the narrowest, thing the
+  // chart draws) and let the bars follow: budgeting one full gap of slack makes
+  // the label strip exactly `avail_w` wide, so labels tile without overlapping
+  // and the outermost ones land on the margin rather than past it.
+  const int label_h = 18;
+  int chart_bot = ui_content_bottom(bounds) - label_h;
+  int chart_h = chart_bot - chart_top;
+  int avail_w = ui_band_w(bounds, chart_bot + 2, label_h);
+  int bar_gap = 8;
+  int bar_w = (avail_w - n * bar_gap) / n;
+  if (bar_w < 10) bar_w = 10;
+#else
   int chart_bot = PBL_IF_ROUND_ELSE(H - 86, H - 66);
   int chart_h = chart_bot - chart_top;
   int bar_w = PBL_IF_ROUND_ELSE(24, 22);
   int bar_gap = PBL_IF_ROUND_ELSE(8, 6);
+#endif
   int total_bars_w = n * bar_w + (n - 1) * bar_gap;
   int bar_x0 = ox + (W - total_bars_w) / 2;
 
@@ -148,7 +209,11 @@ void card_precipitation_draw(GContext *ctx, GRect bounds) {
         char pct_buf[6]; snprintf(pct_buf, sizeof(pct_buf), "%d%%", pct);
         graphics_context_set_text_color(ctx, theme_fg());
         graphics_draw_text(ctx, pct_buf, pct_font,
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+            GRect(bx - PRECIP_LBL_PAD, chart_bot - bh - 18, bar_w + bar_gap + 2 * PRECIP_LBL_PAD, 16),
+#else
             GRect(bx - 4, chart_bot - bh - 18, bar_w + 8, 16),
+#endif
             GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
       }
     }
@@ -156,7 +221,11 @@ void card_precipitation_draw(GContext *ctx, GRect bounds) {
     // Hour label below.
     graphics_context_set_text_color(ctx, theme_fg());
     graphics_draw_text(ctx, labels[i], label_font,
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+        GRect(bx - PRECIP_LBL_PAD, chart_bot + 2, bar_w + bar_gap + 2 * PRECIP_LBL_PAD, 18),
+#else
         GRect(bx - 4, chart_bot + 2, bar_w + 8, 18),
+#endif
         GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
   }
 

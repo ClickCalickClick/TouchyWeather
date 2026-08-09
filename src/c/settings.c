@@ -1,5 +1,6 @@
 #include "settings.h"
 #include "theme.h"
+#include "ui.h"
 
 // Persistence keys. Avoid collisions with comm.c PERSIST_KEY_CACHE=101.
 // (Key 200 retired: theme is now owned solely by theme.c under persist key 1;
@@ -198,6 +199,12 @@ void settings_load(void) {
   if (persist_exists(KEY_PHONE_MANAGES_CARDS)) {
     s_phone_manages_cards = persist_read_bool(KEY_PHONE_MANAGES_CARDS);
   }
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  // D1: the on-watch editor is compiled out on these classes; Clay is the
+  // only card manager, so the gate can never be off (otherwise Clay's
+  // CardEnabled*/CardOrder writes would be ignored forever).
+  s_phone_manages_cards = true;
+#endif
   if (persist_exists(KEY_AUTO_HIDE_PRECIP)) {
     s_auto_hide_precip = persist_read_bool(KEY_AUTO_HIDE_PRECIP);
   }
@@ -273,6 +280,9 @@ bool settings_get_phone_manages_cards(void) {
 }
 
 void settings_set_phone_manages_cards(bool enabled) {
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  enabled = true;  // D1: the gate cannot turn off where no watch editor exists
+#endif
   s_phone_manages_cards = enabled;
   persist_write_bool(KEY_PHONE_MANAGES_CARDS, enabled);
 }

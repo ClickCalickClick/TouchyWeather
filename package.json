@@ -1,7 +1,7 @@
 {
   "name": "TouchyWeather",
   "author": "MakeAwesomeHappen",
-  "version": "1.11.2",
+  "version": "2.0.0",
   "keywords": [
     "pebble-app"
   ],
@@ -32,6 +32,8 @@
     "messageKeys": [
       "Theme",
       "Units",
+      "WindUnits",
+      "WindSpeedUnit",
       "TimeFormat",
       "ClockIs24h",
       "LocationOverride",

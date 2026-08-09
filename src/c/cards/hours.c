@@ -20,6 +20,22 @@
 // because each column has a uniform width. Gaps are tightened on rect (emery)
 // so the two context columns still fit within the 176px usable width.
 
+// Big Mode page: 0 -> hours +1/+3/+5, 1 -> +2/+4/+6. The two pages partition
+// the whole +1h..+6h window the app holds, so Big Mode reaches every hour
+// Normal mode does. Deliberately NOT reset on card change: the page indicator
+// in the header states which half you are on, and a sticky page means a user
+// who cares about the odd hours doesn't re-page every time they swipe back.
+// Ignored entirely outside Big Mode — the Normal layout below loops 0..5.
+static int s_big_page = 0;
+
+bool card_hours_pages_active(void) {
+  return settings_get_big_mode();
+}
+
+void card_hours_page_next(void) {
+  s_big_page ^= 1;
+}
+
 static GColor cond_accent(WeatherCondition cond) {
   switch (cond) {
     case COND_SUNNY:
@@ -46,26 +62,64 @@ static bool fmt_precip(const WeatherData *d, int i, char *buf, size_t n) {
     int mm = (d->hours_precip_x10[i] + 9) / 10; // ceil, always >= 1
     snprintf(buf, n, "%dmm", mm);
   } else {
-    int x = d->hours_precip_x10[i];
-    snprintf(buf, n, "%d.%d\"", x / 10, x % 10);
+    // hours_precip_x10 is TENTHS OF A MILLIMETRE on every platform: index.js
+    // requests only temperature_unit and wind_speed_unit, and Open-Meteo
+    // reports precipitation in mm regardless of those, so the imperial branch
+    // has to do the conversion itself. Printing the mm digits under an inch
+    // mark overstated every wet hour by 25.4x (3.8mm rendered as 3.8", which
+    // reads as four inches of rain in one hour).
+    //
+    // Hundredths is the US convention for rainfall and is what keeps a light
+    // hour off a flat "0.0" beside a droplet icon; a measurable-but-tiny amount
+    // floors at 0.01" rather than rounding away, since fmt_precip is only
+    // reached when the hour is wet at all. On the small classes the existing
+    // shortener takes "0.15\"" to ".15\"", the same glyph count the old format
+    // occupied, so the D2 cascade sees no new pressure.
+    int hundredths = (d->hours_precip_x10[i] * 1000 + 1270) / 2540;
+    if (hundredths < 1) hundredths = 1;
+    snprintf(buf, n, "%d.%02d\"", hundredths / 100, hundredths % 100);
   }
   return true;
 }
+
+#if defined(UI_SCREEN_SMALL_RECT)
+// Drops the leading "0" from an imperial precip amount ("0.2\"" -> ".2\"") —
+// step 4 of the D2 cascade below, and the last few pixels it can find before
+// it has to drop the column outright. Metric ("3mm") is already minimal and is
+// left alone. Hand-rolled rather than using <string.h> so the include itself
+// stays out of the locked platforms' translation unit.
+static void prv_shorten_precip(char *buf) {
+  if (buf[0] != '0' || buf[1] != '.') return;
+  int i = 0;
+  while (buf[i + 1]) { buf[i] = buf[i + 1]; ++i; }
+  buf[i] = '\0';
+}
+#endif
 
 void card_hours_draw(GContext *ctx, GRect bounds) {
   WeatherData *d = weather_data_get();
   int W = bounds.size.w;
 
   // --- Big Mode (Stage B): 3 bigger rows instead of 6 dense ones. ---
-  // Sample every other hour (0,2,4) so the card still spans the full 6h window
-  // (each row prints its own time, so the 2h pitch is self-evident); each row
-  // is just time + condition icon + temperature, large. The wind and precip
-  // columns and the odd hours all drop — every one of them is still in the
-  // "6 Hours" detail modal (SELECT-hold / swipe up). Header renames to "HOURLY"
-  // so showing 3 of 6 under "6 HOURS" doesn't lie. Returns early -> the Normal
-  // 6-row layout below is untouched and Big-OFF stays pixel-identical.
+  // Sample every other hour so the card still spans the full 6h window (each
+  // row prints its own time, so the 2h pitch is self-evident); each row is just
+  // time + condition icon + temperature, large. The wind and precip columns
+  // drop — both are still in the "6 Hours" detail modal (SELECT-hold / swipe
+  // up).
+  //
+  // The three skipped hours are NOT dropped: SELECT (or a tap on touch models)
+  // flips to the other half of the window, and the header carries a "1/2"
+  // indicator so the card never silently withholds data. Before paging existed
+  // a Big Mode user could reach +1/+3/+5 and nothing else, which is what
+  // NicodemPL hit on r/pebble — and the modal the old comment pointed at is a
+  // trend CHART, not readable hourly values. Header renames to "HOURLY" so
+  // showing 3 of 6 under "6 HOURS" doesn't lie.
+  //
+  // Returns early -> the Normal 6-row layout below is untouched and Big-OFF
+  // stays pixel-identical.
   if (settings_get_big_mode()) {
-    static const int idx[3] = {0, 2, 4};
+    static const int idx_pages[2][3] = {{0, 2, 4}, {1, 3, 5}};
+    const int *idx = idx_pages[s_big_page & 1];
     GFont row_font = ui_font_body();  // 24B small / 28B large in Big Mode
     int row_icon, row_h, top_y, hdr_icon;
 #if defined(UI_SCREEN_SMALL_RECT)
@@ -77,7 +131,12 @@ void card_hours_draw(GContext *ctx, GRect bounds) {
 #else  // UI_SCREEN_LARGE_ROUND
     row_icon = 28; row_h = 44; top_y = UI_HEADER_Y + UI_HEADER_HEIGHT + 18; hdr_icon = 22;
 #endif
-    ui_draw_card_header_with_icon(ctx, bounds, "HOURLY", theme_fg(),
+    // "HOURLY 1/2" — the page indicator is part of the label so it rides the
+    // header's existing measure-and-centre path and can't collide with the
+    // icon. Ten glyphs at 18B/24B still centre inside the narrowest class.
+    char hdr[16];
+    snprintf(hdr, sizeof(hdr), "HOURLY %d/2", (s_big_page & 1) + 1);
+    ui_draw_card_header_with_icon(ctx, bounds, hdr, theme_fg(),
                                   UI_HEADER_Y, hdr_icon, icon_draw_clock);
 
     // Uniform time + temp column widths across the 3 sampled rows, then center
@@ -104,7 +163,16 @@ void card_hours_draw(GContext *ctx, GRect bounds) {
       int i = idx[k];
       int row_y = top_y + k * row_h;
       int icon_cx = cluster_x + time_w + gap + row_icon / 2;
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+      // #78 — `th/2 - 2` centres the icon on the text BOX, but GOTHIC_24_BOLD's
+      // ink sits low in its box, so the icon floated ~5px above the digits it
+      // belongs to and read as part of the row above. Measured on basalt: text
+      // ink 44..59 (centre 51.5) against an icon centre of 47. Centre it on the
+      // ink instead. Large classes keep the box-centred expression verbatim.
+      int icon_cy = row_y + th / 2 + 2;
+#else
       int icon_cy = row_y + th / 2 - 2;
+#endif
       graphics_context_set_text_color(ctx, theme_fg());
       graphics_draw_text(ctx, d->hours_label[i], row_font,
           GRect(cluster_x, row_y, time_w + 4, th),
@@ -201,6 +269,68 @@ void card_hours_draw(GContext *ctx, GRect bounds) {
   int cluster_w = time_max.w + gap + icon_size + gap + temp_max.w +
                   gap + wind_col_w +
                   (any_precip ? (gap + precip_col_w) : 0);
+
+#if defined(UI_SCREEN_SMALL_RECT)
+  // D2 — the measured column cascade.
+  //
+  // The five-column cluster measures ~156px at the widest data against 120px
+  // usable here, and the old code centred it and clamped LEFT only, so the
+  // overflow simply ran off the right edge: every precip amount rendered as
+  // "0." with the digits gone (#24) and the widest rows lost the last digit of
+  // the wind speed too (#25). That is R3, and this replaces it.
+  //
+  // The decision (D2) is to keep precip and drop WIND. Dropping wind alone
+  // only recovers 33px and still leaves ~3px of overflow, so steps 3 and 4 are
+  // load-bearing rather than optional — together they find ~9px more, which is
+  // what lets precip actually survive at every data width measured. Step 5
+  // exists so the card can never clip, not because it is expected to fire.
+  //
+  // It re-measures after every step instead of hardcoding a column set, so it
+  // stays right for long labels, three-digit temps and metric/imperial
+  // switches. Chalk has 140px usable, fits all five columns, and is deliberately
+  // NOT part of this branch (#30).
+  bool show_wind = true;
+  bool precip_short = false;
+  const int usable = W - 2 * UI_MARGIN_X;
+#define HOURS_REMEASURE() do {                                       \
+    wind_col_w   = arrow_icon + ctx_text_gap + wind_text_w;          \
+    precip_col_w = drop_icon + ctx_text_gap + precip_text_w;         \
+    cluster_w = time_max.w + gap + icon_size + gap + temp_max.w +    \
+                (show_wind  ? (gap + wind_col_w)   : 0) +            \
+                (any_precip ? (gap + precip_col_w) : 0);             \
+  } while (0)
+
+  // 1. drop the wind column (compass arrow + speed)
+  if (cluster_w > usable) { show_wind = false; HOURS_REMEASURE(); }
+  // 2. tighten the inter-column gap and the icon
+  if (cluster_w > usable) { gap = 3; icon_size = 13; HOURS_REMEASURE(); }
+  // 3. shorten the imperial precip format ("0.2\"" -> ".2\"")
+  if (cluster_w > usable && d->units != UNITS_METRIC) {
+    precip_short = true;
+    precip_text_w = 0;
+    for (int i = 0; i < 6; ++i) {
+      if (fmt_precip(d, i, pbuf, sizeof(pbuf))) {
+        prv_shorten_precip(pbuf);
+        GSize prs = graphics_text_layout_get_content_size(pbuf, pop_font,
+            GRect(0,0,W,30), GTextOverflowModeTrailingEllipsis,
+            GTextAlignmentLeft);
+        if (prs.w > precip_text_w) precip_text_w = prs.w;
+      }
+    }
+    HOURS_REMEASURE();
+  }
+  // 4. last resort — drop precip as well, so the row can never clip
+  if (cluster_w > usable) { any_precip = false; HOURS_REMEASURE(); }
+  // Whatever the cascade dropped, take wind back if it now fits: a dry window
+  // never needed to lose it in the first place.
+  if (!show_wind) {
+    show_wind = true;
+    HOURS_REMEASURE();
+    if (cluster_w > usable) { show_wind = false; HOURS_REMEASURE(); }
+  }
+#undef HOURS_REMEASURE
+#endif
+
   int cluster_x = bounds.origin.x + (W - cluster_w) / 2;
   int floor_x = bounds.origin.x + UI_MARGIN_X;
   if (cluster_x < floor_x) cluster_x = floor_x;
@@ -229,8 +359,13 @@ void card_hours_draw(GContext *ctx, GRect bounds) {
         GRect(temp_x, row_y - 2, temp_max.w + 4, 22),
         GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
 
-    // Wind (always): compass arrow (direction) + speed.
+    // Wind: compass arrow (direction) + speed. Always drawn except where the
+    // D2 cascade above dropped the column. The brace is split across the guard
+    // so the draw statements themselves stay verbatim for the locked classes.
     int wind_x = temp_x + temp_max.w + gap;
+#if defined(UI_SCREEN_SMALL_RECT)
+    if (show_wind) {
+#endif
     fmt_wind(d, i, wbuf, sizeof(wbuf));
     icon_draw_compass_arrow(ctx,
         GPoint(wind_x + arrow_icon/2, icon_cy),
@@ -239,10 +374,17 @@ void card_hours_draw(GContext *ctx, GRect bounds) {
     graphics_draw_text(ctx, wbuf, pop_font,
         GRect(wind_x + arrow_icon + ctx_text_gap, row_y, wind_text_w + 4, 18),
         GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+#if defined(UI_SCREEN_SMALL_RECT)
+    }
+#endif
 
     // Precip (only on wet hours): droplet + amount.
     if (any_precip && fmt_precip(d, i, pbuf, sizeof(pbuf))) {
       int precip_x = wind_x + wind_col_w + gap;
+#if defined(UI_SCREEN_SMALL_RECT)
+      if (!show_wind) precip_x = wind_x;   // precip takes the dropped slot
+      if (precip_short) prv_shorten_precip(pbuf);
+#endif
       icon_draw_droplet(ctx,
           GPoint(precip_x + drop_icon/2, icon_cy),
           drop_icon, theme_accent_blue());

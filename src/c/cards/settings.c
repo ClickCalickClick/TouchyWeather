@@ -6,6 +6,11 @@
 #include "../anim.h"
 #include <stdio.h>
 
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+#include "../ui_layout.h"
+#include "../version_gen.h"
+#endif
+
 // Phase 10D: Settings / Manage Cards card.
 //
 // Layout: header, 1 LOCKED row (MAIN) + 10 TOGGLEABLE rows, footer hint.
@@ -21,6 +26,70 @@
 // against fg labels and matches the Touch & Go card's identity color.
 
 #define LOCKED_COUNT 1
+
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+// D1: read-only status card. The 10-row editor (kept verbatim in the #else
+// for the locked large classes) needs ~170 px of content band; these classes
+// have ~84-86. Card management lives in Clay — PhoneManagesCards is forced on
+// in settings.c — and SELECT here is the unconditional theme escape hatch
+// (TouchWeather.c).
+void card_settings_draw(GContext *ctx, GRect bounds) {
+  ui_draw_card_header_with_icon(ctx, bounds, "SETTINGS",
+      theme_fg(), UI_HEADER_Y, 18, icon_draw_settings_gear);
+
+  const bool big = settings_get_big_mode();
+  const int row_h = big ? 20 : 16;
+
+  enum { ROW_THEME, ROW_BIG, ROW_CARDS, ROW_DIV, ROW_VER, ROW_COUNT };
+  UILayoutRow rows[ROW_COUNT] = {
+    [ROW_THEME] = { .present = true, .h = row_h },
+    [ROW_BIG]   = { .present = true, .h = row_h },
+    [ROW_CARDS] = { .present = true, .h = row_h },
+    // Big Mode: the three enlarged rows take the whole (shorter) band; the
+    // chrome rows yield and the solver recenters.
+    [ROW_DIV]   = { .present = !big, .h = 2 },
+    [ROW_VER]   = { .present = !big, .h = 16 },
+  };
+
+  int top = UI_HEADER_Y + UI_HEADER_HEIGHT + PBL_IF_ROUND_ELSE(2, 6);
+  GRect avail = GRect(bounds.origin.x, bounds.origin.y + top,
+                      bounds.size.w,
+                      ui_content_bottom(bounds) - (bounds.origin.y + top));
+  ui_layout_solve(rows, ROW_COUNT, avail);
+
+  static const char *const labels[] = { "THEME", "BIG MODE", "CARDS" };
+  const char *values[] = {
+    (theme_get() == THEME_LIGHT) ? "LIGHT" : "DARK",
+    big ? "ON" : "OFF",
+    "IN APP",
+  };
+  GFont f = ui_font_label();
+  for (int i = ROW_THEME; i <= ROW_CARDS; ++i) {
+    GRect r = GRect(rows[i].x, rows[i].y - 2, rows[i].w, rows[i].h + 4);
+    graphics_context_set_text_color(ctx, theme_secondary());
+    graphics_draw_text(ctx, labels[i], f, r,
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+    graphics_context_set_text_color(ctx, theme_fg());
+    graphics_draw_text(ctx, values[i], f, r,
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
+  }
+
+  if (rows[ROW_DIV].present) {
+    // Solid 1 px in secondary, NOT muted: a 1 px muted line quantizes to the
+    // background on the 1-bit platforms and vanishes (D6 rule 1).
+    graphics_context_set_fill_color(ctx, theme_secondary());
+    graphics_fill_rect(ctx, GRect(rows[ROW_DIV].x, rows[ROW_DIV].cy,
+                                  rows[ROW_DIV].w, 1), 0, GCornerNone);
+  }
+  if (rows[ROW_VER].present) {
+    graphics_context_set_text_color(ctx, theme_secondary());
+    graphics_draw_text(ctx, "v" APP_VERSION_LABEL, ui_font_caption(),
+        GRect(rows[ROW_VER].x, rows[ROW_VER].y - 2,
+              rows[ROW_VER].w, rows[ROW_VER].h + 4),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  }
+}
+#else
 
 static void prv_draw_checkbox(GContext *ctx, GRect r, bool checked) {
   graphics_context_set_stroke_color(ctx, theme_fg());
@@ -126,3 +195,4 @@ void card_settings_draw(GContext *ctx, GRect bounds) {
         GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
   }
 }
+#endif  // UI_SCREEN_SMALL_RECT || UI_SCREEN_SMALL_ROUND

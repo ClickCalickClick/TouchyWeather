@@ -4,8 +4,13 @@ All notable changes to TouchyWeather. The top entry is the newest release; the
 build reads it to generate the in-app "What's New" screen, so keep the most
 recent version at the top with `## x.y.z` and one bullet (`- `) per line.
 
-## 1.11.2
-- Behind the scenes: anonymous usage stats now count the app and the new TouchyWeather watch face separately.
+## 2.0.0
+- TouchyWeather now runs on six watches: Pebble Time, Time Round, Pebble 2, Pebble 2 Duo, Time 2 and Round 2.
+- New Big Mode — much larger text, high contrast and simpler cards. Turn it on in Settings.
+- Hold SELECT on a forecast card, or swipe up, for a detail view with charts.
+- Show, hide and drag to reorder your cards from your phone as well as on the watch.
+- Rain and Radar can now hide themselves when no rain is expected.
+- Longer battery life: animations pause when you stop interacting.
 
 ## 1.11.1
 - Background auto-refresh now keeps working after you update or reinstall the app.

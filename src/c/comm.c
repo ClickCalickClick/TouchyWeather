@@ -59,20 +59,96 @@ static void prv_bg_exit(void *data);
 // grew — an old 107 blob would leave the new fields as garbage).
 // Bumped 108 -> 109 when sunrise/sunset were widened from [8] to [10] to fit
 // two-digit-hour times like "10:30 PM" (shifts every field after sunset).
+// STOP. 109 IS PINNED — do not bump it, and do not add to the list above.
+//
+// Every bump in that list orphaned the user's blob: the old key is never
+// deleted and persist_exists(new key) is false, so no cache loads and whatever
+// weather_data_init_empty() left in the struct reaches the first draw. Before
+// that function existed, what it left was a hardcoded IMPERIAL forecast — so
+// each of those six bumps shipped a metric user a Fahrenheit Week card for the
+// seconds until the first fetch landed, on every update, and that is what got
+// reported as "the weekly forecast card occasionally switches to Fahrenheit".
+// The bump was the trigger, not the fix.
+//
+// It also leaks the quota. sizeof(WeatherData) is ~480 bytes and an app gets
+// 4 KB of persistent storage; a user carried from 104 to 109 is holding ~2.4 KB
+// of dead blobs against that budget. prv_purge_orphaned_caches() reclaims them.
+//
+// The layout guard below replaces bumping entirely:
+//   * size mismatch  — catches every layout change that alters sizeof(), which
+//     is all six historical bumps. A short read would otherwise leave the tail
+//     of the struct holding stale memory, including `valid` and unterminated
+//     strings, which the cards then format.
+//   * layout version — catches the one case size cannot: a change that keeps
+//     sizeof() identical (reordering fields, or swapping one int for another).
+//     Bump CACHE_LAYOUT_VERSION for those, NOT the key. A rejected blob costs
+//     one refresh and shows an honest "waiting" state meanwhile; a bumped key
+//     costs the same refresh AND leaves the dead bytes behind forever.
 #define PERSIST_KEY_CACHE 109
+// Reserves the value a seventh bump would have taken, so nothing can claim it.
+#define PERSIST_KEY_CACHE_LAYOUT 110
+// v1 -> v2: `wind_units` was added to WeatherData. It landed in existing
+// padding, so sizeof() is still 480 and the size guard above sees NOTHING —
+// this constant is the only thing standing between an old blob and a wind unit
+// read out of whatever that padding byte happened to hold. Exactly the case the
+// layout version exists for.
+#define CACHE_LAYOUT_VERSION 2
+
+// Keys 100–108: retired cache blobs from before 109, never deleted by the
+// bumps that abandoned them. Deleting a key that does not exist is a no-op, so
+// this is safe to run on every launch and self-heals a user at any version.
+#define PERSIST_KEY_CACHE_FIRST_RETIRED 100
+#define PERSIST_KEY_CACHE_LAST_RETIRED  108
+
+// Unconditional delete, no persist_exists() probe and no logging: deleting a
+// key that does not exist is a no-op, and this app has ~400 bytes of RAM
+// headroom (see the size note in nav.c's prv_draw_card) — a probe-and-log version
+// of this loop is several times the code for the same effect.
+static void prv_purge_orphaned_caches(void) {
+  for (uint32_t k = PERSIST_KEY_CACHE_FIRST_RETIRED;
+       k <= PERSIST_KEY_CACHE_LAST_RETIRED; ++k) {
+    persist_delete(k);
+  }
+}
 
 static void prv_save_cache(void) {
   WeatherData *d = weather_data_get();
   if (d->valid) {
     persist_write_data(PERSIST_KEY_CACHE, d, sizeof(WeatherData));
+    persist_write_int(PERSIST_KEY_CACHE_LAYOUT, CACHE_LAYOUT_VERSION);
   }
 }
 
 static void prv_load_cache(void) {
-  if (persist_exists(PERSIST_KEY_CACHE)) {
-    WeatherData *d = weather_data_get();
-    persist_read_data(PERSIST_KEY_CACHE, d, sizeof(WeatherData));
+  WeatherData *d = weather_data_get();
+  if (!persist_exists(PERSIST_KEY_CACHE)) return;
+
+  // A blob written before the layout key existed is BY DEFINITION v1 — that is
+  // what v1 names: the struct as of the pin. Absence therefore grandfathers in
+  // at 1, which is what kept the commit that introduced this guard from
+  // orphaning every current user's cache.
+  //
+  // The literal 1 is load-bearing. This read used to default to
+  // CACHE_LAYOUT_VERSION, which was indistinguishable only while that constant
+  // WAS 1. At v2 it silently meant "a blob with no layout key is current", so a
+  // pre-guard blob would have passed the version check, passed the size check
+  // (wind_units did not move sizeof), and loaded — handing the new field a
+  // padding byte to interpret. Bumping the version is not enough on its own;
+  // the default has to name a version, not track the newest one.
+  int layout = persist_exists(PERSIST_KEY_CACHE_LAYOUT)
+                   ? persist_read_int(PERSIST_KEY_CACHE_LAYOUT)
+                   : 1;
+  int stored = persist_get_size(PERSIST_KEY_CACHE);
+
+  if (stored != (int)sizeof(WeatherData) || layout != CACHE_LAYOUT_VERSION) {
+    APP_LOG(APP_LOG_LEVEL_WARNING, "Cache rejected: %d/%d", stored, layout);
+    persist_delete(PERSIST_KEY_CACHE);
+    persist_delete(PERSIST_KEY_CACHE_LAYOUT);
+    d->valid = false;  // stay in the honest empty state until the fetch lands
+    return;
   }
+
+  persist_read_data(PERSIST_KEY_CACHE, d, sizeof(WeatherData));
 }
 
 static void prv_inbox_received(DictionaryIterator *iter, void *context) {
@@ -300,6 +376,37 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
     d->units = (Units)((t->type == TUPLE_CSTRING) ? atoi(t->value->cstring)
                                                   : (int)t->value->int32);
   }
+  // Wind unit, already resolved phone-side (Clay's "Auto" never reaches the
+  // watch). Deliberately NOT nested under Units, and with no derive-from-units
+  // fallback, though the first draft had both.
+  //
+  // A Clay save sends a settings message through this same handler carrying
+  // Units but NOT WindUnits — WindUnits is not a Clay key. So a fallback under
+  // Units would recompute the wind unit from the temperature system on every
+  // settings save and stamp an explicit m/s choice back to KMH. Worse, a save
+  // that touched only a non-weather setting sets needsFetch false, so no
+  // refetch follows to correct it and the watch stays wrong until the next
+  // scheduled fetch.
+  //
+  // The invariant instead: wind_units is written only by the payload carrying
+  // the wind numbers it describes. Absent key => keep what we had. On a fresh
+  // install that is 0 == MPH, which is unreachable anyway — the struct has no
+  // reading yet, so nothing draws a wind value until the first real payload.
+  if ((t = dict_find(iter, MESSAGE_KEY_WindUnits))) {
+    // int32 only — no TUPLE_CSTRING arm, unlike Units above. Units needs one
+    // because it IS a Clay radiogroup key and Clay delivers those as strings.
+    // WindUnits is not a Clay key at all: the Clay control is WindSpeedUnit
+    // ("auto"/"mph"/...), which the watch never reads, and index.js resolves it
+    // to this integer itself. A cstring arm here would be ~20 bytes of code for
+    // a case that cannot occur.
+    int32_t wu = t->value->int32;
+    // Clamp at the choke point, once, so every consumer can index a 3-entry
+    // table with the raw value and none needs its own bounds check. The
+    // alternative — a range test at each use — is the N-copies pattern that
+    // cost this app its inbox once already.
+    d->wind_units = (wu < 0 || wu > WIND_UNITS_MS) ? WIND_UNITS_MPH
+                                                   : (uint8_t)wu;
+  }
   if ((t = dict_find(iter, MESSAGE_KEY_LastUpdated))) {
     // PKJS sends the unix-second timestamp of the fetch. Sentinel "1" from
     // our refresh-trigger doesn't carry useful time info; treat any value
@@ -456,6 +563,28 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
   if (got_anything) {
     d->valid = true;
     prv_save_cache();
+    // Reclaim the abandoned pre-109 cache blobs — ONCE per session, and only
+    // here. Placement is not a style choice; it was measured twice.
+    //
+    // The obvious homes both break the first fetch of the session. In
+    // comm_load_cache() the nine persist_exists calls sit ahead of
+    // app_message_open(), and PKJS sends its first payload the instant the JS
+    // environment is ready — the watch was not listening yet, and the send
+    // failed 3/3 on basalt against 3/3 clean without the loop. Moving it to the
+    // 750ms timer failed 3/3 as well: that timer fires while the first payload
+    // is being delivered, and flash reads block the app task long enough to lose
+    // it. Both cost the app its entire first payload — the send failed and the
+    // refresh request that followed went unanswered, leaving the user at "NO
+    // DATA YET" until a manual refresh.
+    //
+    // Here, the payload is already parsed and prv_save_cache() has just written
+    // 480 bytes, so nine reads are noise beside flash traffic we are doing
+    // anyway, and there is no inbound message left to drop.
+    static bool s_purged_this_session = false;
+    if (!s_purged_this_session) {
+      s_purged_this_session = true;
+      prv_purge_orphaned_caches();
+    }
     prv_evaluate_auto_hide();  // Phase 3.2: re-hide/show precip+radar per forecast
     anim_kick();  // fresh data: wake the hero icon for another window
     if (s_update_cb) s_update_cb();
@@ -664,9 +793,9 @@ static void prv_evaluate_auto_hide(void) {
 
 static void prv_initial_refresh(void *ctx) {
   (void)ctx;
-  
+
   WeatherData *d = weather_data_get();
-  
+
   // If no cached data exists, always fetch
   if (!d->valid || d->last_updated == 0) {
     APP_LOG(APP_LOG_LEVEL_INFO, "No cached data, fetching on open");

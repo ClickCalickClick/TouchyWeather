@@ -7,6 +7,82 @@
 #include "../anim.h"
 #include <stdio.h>
 
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+#include "../ui_layout.h"
+
+// --- Phase 3 (D4 + D5): small-class flow layout ---------------------------
+//
+// This card used to place the location label, the hero icon, the big temp and
+// the hi/lo column at hard-coded y anchors keyed off emery's 228px screen. At
+// 144/180px they all landed in the same ~30px band and drew on top of one
+// another: the icon over the location text (#10), the icon over the temp's
+// degree glyph (#11), the icon over the hi/lo up-arrow (#12), and on chalk the
+// hi value's degree ran under the bezel (#13). Hiding the location left a hole,
+// which a `block_shift` fudge tried to re-center by hand.
+//
+// Every element is now a row in a measured stack (ui_layout.c), so nothing
+// shares a band and nothing can overlap; a hidden row reflows the rest natively
+// and `block_shift` is gone. The middle row is the watchface's weather idiom —
+// [icon] [temp] [hi over lo], three columns on ONE midline, measured as a
+// cluster and centered.
+//
+// Row heights are VISIBLE INK, not the font's layout box: a Pebble system font
+// carries dead top-side leading (10px on GOTHIC_24_BOLD), and reserving it is
+// what made hand-tuned stacks look top-heavy. Each text box is drawn lifted by
+// its font's rise so the glyph, not the box, lands on the reserved band.
+#if defined(UI_SCREEN_SMALL_ROUND)
+  #define MC_ICON_START     38
+  #define MC_CLUSTER_GAP     8
+#else  // UI_SCREEN_SMALL_RECT
+  #define MC_ICON_START     28
+  #define MC_CLUSTER_GAP     6
+#endif
+// Floor for the cluster's width giveback — below this a sun is a speck, so we
+// accept the overflow instead of shrinking further (watchface FZ_ICON_MIN).
+#define MC_ICON_MIN         18
+#define MC_HILO_PITCH       20  // row-to-row spacing of the stacked hi/lo pair
+#define MC_HILO_ARROW_COL   12  // arrow drawn at x+5, its number at x+12
+#define MC_ARROW_SIZE       10
+#define MC_TEXT_RISE         3  // lift for a vertically CENTERED box (temp, hi/lo)
+#define MC_LABEL_INK_H       9  // GOTHIC_14_BOLD ink height...
+#define MC_LABEL_RISE        6  // ...and its top-side leading
+#define MC_FEELS_INK_H      11  // GOTHIC_18_BOLD ink height...
+#define MC_FEELS_RISE        7  // ...and its top-side leading
+#define MC_WIND_ROW_H       16  // sized by the row's glyphs, not its 9px of text
+
+// Stacked hi/lo mini column: up-arrow + high (orange) over down-arrow + low
+// (blue). `x` is the left edge of the arrow gutter and `cy` the vertical CENTER
+// of the pair, so the two rows straddle the same midline the icon and temp sit
+// on rather than hanging below it — hanging below it is what buried the
+// up-arrow under the hero icon (#12).
+static void prv_draw_hilo(GContext *ctx, int x, int cy, int w, GFont f,
+                          const WeatherData *d) {
+  char hi_buf[8], lo_buf[8];
+  snprintf(hi_buf, sizeof(hi_buf), "%d°", d->high);
+  snprintf(lo_buf, sizeof(lo_buf), "%d°", d->low);
+  const int hi_cy = cy - MC_HILO_PITCH / 2;
+  const int lo_cy = cy + MC_HILO_PITCH / 2;
+  const int tx = x + MC_HILO_ARROW_COL;
+  const int tw = w - MC_HILO_ARROW_COL;
+  // The box is a couple of px taller than the pitch so an 18px bold line box
+  // is never clipped; the extra height hangs BELOW the ink, where nothing else
+  // is drawn, and the text is top-anchored so the glyph doesn't move.
+  const int th = MC_HILO_PITCH + 4;
+  icon_draw_arrow_up(ctx, GPoint(x + 5, hi_cy), MC_ARROW_SIZE,
+                     theme_accent_orange());
+  graphics_context_set_text_color(ctx, theme_accent_orange());
+  graphics_draw_text(ctx, hi_buf, f,
+      GRect(tx, hi_cy - MC_HILO_PITCH / 2 - MC_TEXT_RISE, tw, th),
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+  icon_draw_arrow_down(ctx, GPoint(x + 5, lo_cy), MC_ARROW_SIZE,
+                       theme_accent_blue());
+  graphics_context_set_text_color(ctx, theme_accent_blue());
+  graphics_draw_text(ctx, lo_buf, f,
+      GRect(tx, lo_cy - MC_HILO_PITCH / 2 - MC_TEXT_RISE, tw, th),
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+}
+#endif  // UI_SCREEN_SMALL_RECT || UI_SCREEN_SMALL_ROUND
+
 void card_main_draw(GContext *ctx, GRect bounds) {
   WeatherData *d = weather_data_get();
   int W = bounds.size.w;
@@ -27,9 +103,22 @@ void card_main_draw(GContext *ctx, GRect bounds) {
   if (settings_get_big_mode()) {
     int icon_size, icon_y, temp_y, hilo_y;
 #if defined(UI_SCREEN_SMALL_RECT)
-    icon_size = 40; icon_y = 4;  temp_y = 46;  hilo_y = 96;
+    // Retuned against measured INK, not the boxes (Phase 9). At the shipped
+    // values the hi/lo ink ran from 101 to 120 and the Big-Mode pill starts at
+    // 120 — a pixel-band scan showed the two merging into ONE contiguous run of
+    // ink, which is #76 ("the degree ring merges with the pill outline") stated
+    // exactly. At the same time the icon's rays reached row 0 — the Big-Mode
+    // instance of #16, which Phase 5 closed for normal mode only — while 22px
+    // sat dead between the icon and the temperature (#77).
+    //
+    // The band is 4..116 (ui_content_bottom in Big Mode) and the three rows'
+    // ink is 37 + 29 + 19 = 85, so the slack is 27px: 13 to each gap, and the
+    // stack now starts at 4 and ends at 112 with 8px of air above the pill.
+    icon_size = 40; icon_y = 8;  temp_y = 40;  hilo_y = 89;
 #elif defined(UI_SCREEN_SMALL_ROUND)
-    icon_size = 46; icon_y = 10; temp_y = 54;  hilo_y = 104;
+    // chalk has the room (#76 is not on its platform list and it measured 6px
+    // clear); this only evens out #77's 20-vs-13 gap split.
+    icon_size = 46; icon_y = 10; temp_y = 51;  hilo_y = 105;
 #elif defined(UI_SCREEN_LARGE_RECT)
     icon_size = 60; icon_y = 18; temp_y = 74;  hilo_y = 138;
 #else  // UI_SCREEN_LARGE_ROUND
@@ -56,12 +145,52 @@ void card_main_draw(GContext *ctx, GRect bounds) {
     GSize lo_sz = graphics_text_layout_get_content_size(lo_buf, hilo_font,
         GRect(0, 0, W, 40), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
     int arrow = (icon_size >= 60) ? 16 : 12;
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+    // #79 — the arrow's ink ends ~1px short of the digit box (its arms reach
+    // arrow/2 plus half of a 3px stroke), so at 24_BOLD in Big Mode the glyphs
+    // touch. 2px more gutter is the whole fix; the large classes' wider arrows
+    // and bigger type never had the problem.
+    int ag = 6;          // arrow -> its number
+#else
     int ag = 4;          // arrow -> its number
+#endif
     int group_gap = 16;  // high group -> low group
     int th = (icon_size >= 60) ? 34 : 28;  // hi/lo text box height
+    // The unit letter. Big Mode drops the wind row, and that row carries the
+    // app's ONLY "MPH"/"KMH" string (see the Normal layout below) — so before
+    // this there was no way to tell Fahrenheit from Celsius ANYWHERE in the
+    // app while Big Mode was on. That is what makes a stale or first-launch
+    // imperial reading look like a units bug rather than stale data (r/pebble
+    // 2.0 thread). It rides the hi/lo cluster rather than suffixing the hero
+    // numeral because BITHAM_42 "100°F" does not fit 120px of usable width.
+    // Same font as the hi/lo digits so it shares their baseline for free.
+    const char *unit_buf = (d->units == UNITS_METRIC) ? "C" : "F";
+    GSize unit_sz = graphics_text_layout_get_content_size(unit_buf, hilo_font,
+        GRect(0, 0, W, 40), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+    int ug = 6;          // low number -> unit letter
     int hi_group_w = arrow + ag + hi_sz.w;
     int lo_group_w = arrow + ag + lo_sz.w;
-    int cluster_w = hi_group_w + group_gap + lo_group_w;
+    int cluster_w = hi_group_w + group_gap + lo_group_w + ug + unit_sz.w;
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+    // The small classes have 120px (144 rect) / 140px (180 round) usable, and
+    // the hi/lo pair alone already measures ~122 at two digits — so the unit
+    // letter has to be paid for out of the gaps. Re-measured after each step
+    // rather than hardcoded, so sub-zero lows and three-digit highs stay right.
+    // The large classes have the room and keep the expression above verbatim.
+    const int hilo_usable = W - 2 * UI_MARGIN_X;
+#define HILO_REMEASURE() do {                                          \
+      hi_group_w = arrow + ag + hi_sz.w;                               \
+      lo_group_w = arrow + ag + lo_sz.w;                               \
+      cluster_w = hi_group_w + group_gap + lo_group_w + ug + unit_sz.w;\
+    } while (0)
+    // 1. close the gap between the high and low groups
+    if (cluster_w > hilo_usable) { group_gap = 8; HILO_REMEASURE(); }
+    // 2. tighten each arrow against its own number, and the unit against the low
+    if (cluster_w > hilo_usable) { ag = 4; ug = 4; HILO_REMEASURE(); }
+    // 3. last resort — shrink the arrows themselves rather than clip a digit
+    if (cluster_w > hilo_usable) { arrow = 10; HILO_REMEASURE(); }
+#undef HILO_REMEASURE
+#endif
     int cx = ox + (W - cluster_w) / 2;
     int arrow_cy = hilo_y + th / 2 - 2;
     graphics_context_set_text_color(ctx, theme_fg());
@@ -74,12 +203,212 @@ void card_main_draw(GContext *ctx, GRect bounds) {
     graphics_draw_text(ctx, lo_buf, hilo_font,
         GRect(lx + arrow + ag, hilo_y, lo_sz.w + 4, th),
         GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+    graphics_draw_text(ctx, unit_buf, hilo_font,
+        GRect(lx + lo_group_w + ug, hilo_y, unit_sz.w + 4, th),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
     // Status banner (enlarged for Big Mode inside ui_draw_status_banner).
     ui_draw_auto_banner(ctx, bounds, d->rain_alert_min, d->last_updated,
                         anim_get_frame());
     return;
   }
 
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  // --- Normal mode, small classes: measured row stack (see the header) ---
+  (void)H;
+  (void)margin;
+
+  // The weather row is as tall as its tallest member — the icon or the stacked
+  // hi/lo pair. The temp's ink is shorter than both at this tier.
+  const int weather_h = (MC_ICON_START > 2 * MC_HILO_PITCH)
+                        ? MC_ICON_START : 2 * MC_HILO_PITCH;
+
+  // D5: the location is its own row, so switching it off (Clay "Show location",
+  // default OFF) recenters everything below with no hole left behind. Order is
+  // the D4 sketch's: it also lands the widest row — the weather cluster — on the
+  // band's midline, which on chalk is where the chord is widest.
+  enum { MC_ROW_LOC, MC_ROW_FEELS, MC_ROW_WEATHER, MC_ROW_WIND, MC_ROW_COUNT };
+  UILayoutRow rows[MC_ROW_COUNT] = {
+    [MC_ROW_LOC]     = { .present = d->show_location && d->location_name[0],
+                         .h = MC_LABEL_INK_H },
+    [MC_ROW_FEELS]   = { .present = true, .h = MC_FEELS_INK_H },
+    [MC_ROW_WEATHER] = { .present = true, .h = weather_h },
+    [MC_ROW_WIND]    = { .present = true, .h = MC_WIND_ROW_H },
+  };
+  GRect avail = GRect(ox, bounds.origin.y, W,
+                      ui_content_bottom(bounds) - bounds.origin.y);
+  ui_layout_solve(rows, MC_ROW_COUNT, avail);
+
+  // Location name. rows[].w is chord-clamped on chalk, so a long name
+  // ellipsizes at the glass edge instead of running under the bezel.
+  if (rows[MC_ROW_LOC].present) {
+    graphics_context_set_text_color(ctx, theme_fg());
+    graphics_draw_text(ctx, d->location_name, ui_font_label(),
+        GRect(rows[MC_ROW_LOC].x, rows[MC_ROW_LOC].y - MC_LABEL_RISE,
+              rows[MC_ROW_LOC].w, MC_LABEL_RISE + rows[MC_ROW_LOC].h + 4),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  }
+
+  // "FEELS 75°" — ui_font_header (18B), NOT the 24B the large classes use. At
+  // 24B against a 28B hero temp the two readings are the same visual weight,
+  // and since D4 puts this row ABOVE the temp the eye lands on the feels-like
+  // number first. 18B makes it read as the secondary value it is and gives the
+  // card a clean 28 / 18 / 14 ramp.
+  {
+    char feels_buf[16];
+    snprintf(feels_buf, sizeof(feels_buf), "FEELS %d°", d->feels_like);
+    graphics_context_set_text_color(ctx, theme_fg());
+    graphics_draw_text(ctx, feels_buf, ui_font_header(),
+        GRect(rows[MC_ROW_FEELS].x, rows[MC_ROW_FEELS].y - MC_FEELS_RISE,
+              rows[MC_ROW_FEELS].w, MC_FEELS_RISE + rows[MC_ROW_FEELS].h + 4),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  }
+
+  // Weather row: [icon] [temp] [hi over lo] as one centered cluster on a single
+  // midline. The temp and the hi/lo column are MEASURED, so the cluster centers
+  // on real content instead of on a fixed reserve that pads out for short
+  // values and clips for long ones.
+  //
+  // The temp font is GOTHIC_28_BOLD (ui_font_title), not the LECO the large
+  // classes hero with: "72°" is 66px of LECO_36, over half the 120px line, and
+  // no icon and hi/lo column fit beside it. This is the tier the watchface
+  // settled on for the same row on the same hardware, and being a full font it
+  // carries real degree and minus glyphs.
+  {
+    const int row_cy = rows[MC_ROW_WEATHER].cy;
+    const int row_w = rows[MC_ROW_WEATHER].w;
+    GFont temp_font = ui_font_title();
+    GFont hilo_font = ui_font_header();
+
+    char temp_buf[8];
+    snprintf(temp_buf, sizeof(temp_buf), "%d°", d->temp);
+    GSize temp_sz = graphics_text_layout_get_content_size(temp_buf, temp_font,
+        GRect(0, 0, W, 50), GTextOverflowModeFill, GTextAlignmentLeft);
+
+    char hi_b[8], lo_b[8];
+    snprintf(hi_b, sizeof(hi_b), "%d°", d->high);
+    snprintf(lo_b, sizeof(lo_b), "%d°", d->low);
+    GSize hi_sz = graphics_text_layout_get_content_size(hi_b, hilo_font,
+        GRect(0, 0, W, 30), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+    GSize lo_sz = graphics_text_layout_get_content_size(lo_b, hilo_font,
+        GRect(0, 0, W, 30), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+    const int hilo_w = MC_HILO_ARROW_COL +
+                       (hi_sz.w > lo_sz.w ? hi_sz.w : lo_sz.w);
+
+    int icon = MC_ICON_START;
+    int cluster = icon + MC_CLUSTER_GAP + temp_sz.w + MC_CLUSTER_GAP + hilo_w;
+    // Too wide (a three-digit or sub-zero temp, or simply a tight line)? Give
+    // width back from the icon rather than let the readings run off the edge —
+    // a smaller sun still reads as a sun, a clipped "↑96°" does not.
+    if (cluster > row_w) {
+      int over = cluster - row_w;
+      int room = icon - MC_ICON_MIN;
+      int shrink = (room < over) ? room : over;
+      if (shrink > 0) {
+        icon -= shrink;
+        cluster -= shrink;
+      }
+    }
+    int cx = rows[MC_ROW_WEATHER].x + (row_w - cluster) / 2;
+    if (cx < rows[MC_ROW_WEATHER].x) cx = rows[MC_ROW_WEATHER].x;
+
+    icon_draw_condition_animated(ctx, GPoint(cx + icon / 2, row_cy),
+                                 icon, d->condition, anim_get_frame());
+    graphics_context_set_text_color(ctx, theme_fg());
+    graphics_draw_text(ctx, temp_buf, temp_font,
+        GRect(cx + icon + MC_CLUSTER_GAP,
+              row_cy - temp_sz.h / 2 - MC_TEXT_RISE,
+              temp_sz.w + 4, temp_sz.h + 2),
+        GTextOverflowModeFill, GTextAlignmentLeft, NULL);
+    prv_draw_hilo(ctx, cx + icon + MC_CLUSTER_GAP + temp_sz.w + MC_CLUSTER_GAP,
+                  row_cy, hilo_w, hilo_font, d);
+  }
+
+  // Bottom row: [wind glyph] 12MPH NW | [droplet] 58%, measured as one cluster
+  // and centered — the old fixed W/2 split gave the wind column a ~2px left
+  // gutter against the card's 12px right one (#17).
+  //
+  // The leading glyphs are the first thing to go when the line won't hold: at
+  // GOTHIC_14_BOLD a metric worst case ("12KMH NNW") is a few px wider than the
+  // 120px rect line can take with them, and a clipped reading is worse than a
+  // missing decoration.
+  {
+    const int row_cy = rows[MC_ROW_WIND].cy;
+    const int row_w = rows[MC_ROW_WIND].w;
+    GFont lf = ui_font_label();
+
+    char wind_buf[16];
+    snprintf(wind_buf, sizeof(wind_buf), "%d%s %s",
+             d->wind_speed, wind_unit_label(d), d->wind_dir);
+    // Humidity or dew point, per the Clay "Show dew point" switch.
+    char hum_buf[8];
+    if (d->use_dew_point) {
+      snprintf(hum_buf, sizeof(hum_buf), "%d°", d->dew_point);
+    } else {
+      snprintf(hum_buf, sizeof(hum_buf), "%d%%", d->humidity);
+    }
+
+    GSize wind_sz = graphics_text_layout_get_content_size(wind_buf, lf,
+        GRect(0, 0, W, 30), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+    GSize hum_sz = graphics_text_layout_get_content_size(hum_buf, lf,
+        GRect(0, 0, W, 30), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft);
+
+#if defined(UI_SCREEN_SMALL_ROUND)
+    const int wind_icon = 14;  // chalk's ~156px line holds both glyphs
+#else
+    // SMALL_RECT's 120px line holds one glyph, not two — at GOTHIC_14_BOLD a
+    // two-digit wind speed spends every pixel the divider leaves over. The
+    // swoosh is the one to lose: "MPH"/"KMH" already labels that reading. The
+    // droplet stays, because it is what keeps "49%" from reading as a rain
+    // chance and, in dew-point mode, "49°" from reading as a temperature.
+    const int wind_icon = 0;
+#endif
+    // 14px, not 12: below that the droplet loses its shape and renders as a
+    // plain disc.
+    const int hum_icon = 14, glyph_gap = 3, sep_gap = 4;
+    const int chrome = sep_gap + 1 + sep_gap;  // the divider and its air
+    const int text_w = wind_sz.w + hum_sz.w;
+    const int glyph_w = (wind_icon ? wind_icon + glyph_gap : 0) +
+                        (hum_icon ? hum_icon + glyph_gap : 0);
+    // Backstop for the widest data (metric "12KMH NNW" against "100%"): the
+    // glyphs are decoration, the readings are not.
+    const bool show_glyphs = (text_w + chrome + glyph_w <= row_w);
+    const int cluster = text_w + chrome + (show_glyphs ? glyph_w : 0);
+
+    int x = rows[MC_ROW_WIND].x + (row_w - cluster) / 2;
+    if (x < rows[MC_ROW_WIND].x) x = rows[MC_ROW_WIND].x;
+    // Text sits on its own ink band, centered on the row's midline; the glyphs
+    // center on the same midline.
+    const int ty = row_cy - MC_LABEL_INK_H / 2 - MC_LABEL_RISE;
+    const int th = MC_LABEL_RISE + MC_LABEL_INK_H + 4;
+
+    if (show_glyphs && wind_icon) {
+      icon_draw_wind(ctx, GPoint(x + wind_icon / 2, row_cy), wind_icon,
+                     theme_fg());
+      x += wind_icon + glyph_gap;
+    }
+    graphics_context_set_text_color(ctx, theme_fg());
+    graphics_draw_text(ctx, wind_buf, lf, GRect(x, ty, wind_sz.w + 2, th),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+    x += wind_sz.w + sep_gap;
+
+    // Solid 1px in secondary, NOT muted: a 1px muted stroke quantizes to the
+    // background on the 1-bit platforms and the divider vanishes (D6 rule 1).
+    graphics_context_set_stroke_color(ctx, theme_secondary());
+    graphics_context_set_stroke_width(ctx, 1);
+    graphics_draw_line(ctx, GPoint(x, row_cy - MC_WIND_ROW_H / 2),
+                       GPoint(x, row_cy + MC_WIND_ROW_H / 2));
+    x += 1 + sep_gap;
+
+    if (show_glyphs && hum_icon) {
+      icon_draw_droplet(ctx, GPoint(x + hum_icon / 2, row_cy), hum_icon,
+                        theme_accent_blue());
+      x += hum_icon + glyph_gap;
+    }
+    graphics_context_set_text_color(ctx, theme_fg());
+    graphics_draw_text(ctx, hum_buf, lf, GRect(x, ty, hum_sz.w + 2, th),
+        GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+  }
+#else
   // Nudge the main-card layout down. `yshift` is the base shift applied to
   // the whole card; round (Gabbro) adds further tiers on top.
   //   yshift     — base for the bottom group (wind/humidity row + banner)
@@ -90,46 +419,19 @@ void card_main_draw(GContext *ctx, GRect bounds) {
   //   top_shift  — weather icon: hero_shift + 9px on round.
   //   loc_shift  — location label: top_shift + 2px on round (a touch lower
   //                than the icon).
-  // The shift tiers below (yshift/hero_shift/top_shift/loc_shift) and the
-  // large icon/temp box are keyed off the taller emery/gabbro screens. On the
-  // two small classes those absolutes leave the fixed-from-top hero block
-  // (icon → temp/hi-lo → FEELS) and the fixed-from-bottom wind row colliding in
-  // the middle — the wind glyph rode up into "FEELS" (Phase 5.2). Give the
-  // small classes their own compressed anchors: a smaller icon/temp box and a
-  // higher wind row. The no-location re-centering below (block_shift) then
-  // vertically centers the hero block above the wind row.
   //
-  // Layout anchors for the hero block and the wind/humidity row. When the
-  // location label is hidden (Clay "Show location" OFF, the default) the hero
-  // block re-centers vertically between the top of the screen and the wind row,
-  // so the card isn't top-heavy with the location gone. The wind row, pill and
-  // page indicator stay put — nothing below moves and no other card is affected.
-  // When location is ON, block_shift is 0 and the layout matches the
-  // location-enabled design. Large-rect (emery) / large-round (gabbro) keep the
-  // verbatim pre-Phase-5 expressions → both stay pixel-identical.
-#if defined(UI_SCREEN_SMALL_RECT)
-  // 144x168. temp_h must stay ~44 so FEELS clears the hi/lo column (its low
-  // value sits at temp_y+46); a smaller box rides FEELS up into "50°". row_y
-  // 86 puts the wind row just below FEELS and just above the banner (top ~126).
-  int icon_size = 28;
-  int temp_h = 44;
-  int feels_lift = 0;
-  int icon_y = 2;
-  int temp_y = 8;
-  int row_y = 86;
-  int loc_shift = 0;
-#elif defined(UI_SCREEN_SMALL_ROUND)
-  // 180x180. Same temp_h clearance rule; a touch more vertical room than
-  // small-rect, so the block sits lower and the wind row at 100 clears the
-  // small-round banner (top ~140).
-  int icon_size = 38;
-  int temp_h = 46;
-  int feels_lift = 0;
-  int icon_y = 8;
-  int temp_y = 16;
-  int row_y = 100;
-  int loc_shift = 0;
-#else
+  // LOCKED PATH: emery (large-rect) and gabbro (large-round) only. Every
+  // expression below is the verbatim pre-Phase-5 one and must stay that way —
+  // tools/lock_guard.py fails the build if their binaries move. The two small
+  // classes took their own compressed anchors here until Phase 3 replaced the
+  // whole approach with the measured row stack above.
+  //
+  // When the location label is hidden (Clay "Show location" OFF, the default)
+  // the hero block re-centers vertically between the top of the screen and the
+  // wind row, so the card isn't top-heavy with the location gone. The wind row,
+  // pill and page indicator stay put — nothing below moves and no other card is
+  // affected. When location is ON, block_shift is 0 and the layout matches the
+  // location-enabled design.
   int yshift = PBL_IF_ROUND_ELSE(5, 2);
   int hero_shift = yshift + PBL_IF_ROUND_ELSE(3, 0);
   int top_shift = hero_shift + PBL_IF_ROUND_ELSE(9, 0);
@@ -140,7 +442,6 @@ void card_main_draw(GContext *ctx, GRect bounds) {
   int icon_y = PBL_IF_ROUND_ELSE(32, 26) + top_shift;
   int temp_y = PBL_IF_ROUND_ELSE(60, 60) + hero_shift;
   int row_y  = PBL_IF_ROUND_ELSE(H - 104, H - 84) + yshift;
-#endif
   int block_top = icon_y;
   int block_bottom = temp_y + temp_h - feels_lift + 30; // FEELS box bottom
   int block_h = block_bottom - block_top;
@@ -151,14 +452,9 @@ void card_main_draw(GContext *ctx, GRect bounds) {
   // Gabbro (large-round), no-location mode only: drop the temp / hi-lo / FEELS
   // cluster 8px below the centered icon for a more balanced split. Icon stays
   // put; the location-on look and Emery are unchanged. hi-lo and FEELS derive
-  // from temp_y, so they follow. The small classes use their own compressed
-  // anchors above and don't want this gabbro-tuned drop. Kept at this position
-  // (after block_shift) so gabbro's codegen is byte-for-byte unchanged.
-#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
-  int temp_drop = 0;
-#else
+  // from temp_y, so they follow. Kept at this position (after block_shift) so
+  // gabbro's codegen is byte-for-byte unchanged.
   int temp_drop = PBL_IF_ROUND_ELSE(d->show_location ? 0 : 8, 0);
-#endif
   temp_y += temp_drop;
 
   // Location name header, centered at the very top. Reads as a quiet label
@@ -238,12 +534,12 @@ void card_main_draw(GContext *ctx, GRect bounds) {
   graphics_context_set_stroke_width(ctx, 1);
   graphics_draw_line(ctx, GPoint(ox + W/2, row_y), GPoint(ox + W/2, row_y + 32));
 
-  // Wind (left column). Speed unit follows the user's selected system.
+  // Wind (left column). Speed unit follows the dedicated wind-unit setting,
+  // NOT `units` — see WindUnits in weather_data.h.
   icon_draw_wind(ctx, GPoint(ox + W/4, row_y + 8), 22, theme_fg());
   char wind_buf[16];
-  const char *wind_unit = (d->units == UNITS_METRIC) ? "KMH" : "MPH";
   snprintf(wind_buf, sizeof(wind_buf), "%d%s %s",
-           d->wind_speed, wind_unit, d->wind_dir);
+           d->wind_speed, wind_unit_label(d), d->wind_dir);
   graphics_context_set_text_color(ctx, theme_fg());
   graphics_draw_text(ctx, wind_buf,
                      ui_font_header(),
@@ -265,6 +561,7 @@ void card_main_draw(GContext *ctx, GRect bounds) {
                      GRect(ox + W/2, row_y + 16, W/2, 22),
                      GTextOverflowModeTrailingEllipsis,
                      GTextAlignmentCenter, NULL);
+#endif  // UI_SCREEN_SMALL_RECT || UI_SCREEN_SMALL_ROUND
 
   // Rotating status banner (rain ⇄ updated). The lowered pill position now
   // lives in ui_draw_status_banner's pad_bottom so every card matches, so we
