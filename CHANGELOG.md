@@ -4,6 +4,13 @@ All notable changes to TouchyWeather. The top entry is the newest release; the
 build reads it to generate the in-app "What's New" screen, so keep the most
 recent version at the top with `## x.y.z` and one bullet (`- `) per line.
 
+## 2.1.0
+- Wind speed can now be shown in m/s, separately from °C and °F — choose it in Settings.
+- Big Mode: the 6 Hours card now reaches all six hours — press SELECT to page between them.
+- Big Mode: temperature units are now labelled, and the detail views use large type too.
+- The 6 Hours card no longer shows rainfall in millimetres when inches are selected.
+- The Week card no longer shows placeholder Fahrenheit data when there is no fresh forecast.
+
 ## 2.0.0
 - TouchyWeather now runs on six watches: Pebble Time, Time Round, Pebble 2, Pebble 2 Duo, Time 2 and Round 2.
 - New Big Mode — much larger text, high contrast and simpler cards. Turn it on in Settings.
