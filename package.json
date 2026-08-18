@@ -1,6 +1,9 @@
 {
   "name": "TouchyWeather",
   "author": "MakeAwesomeHappen",
+  "contributors": [
+    "Eric Migicovsky <eric@repebble.com> (https://github.com/ericmigi)"
+  ],
   "version": "2.1.0",
   "keywords": [
     "pebble-app"

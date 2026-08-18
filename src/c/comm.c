@@ -26,15 +26,29 @@ static AppTimer *s_bg_timeout_timer = NULL;
 static bool s_is_background_mode = false;
 static WakeupId s_wakeup_id = -1;
 static AppTimer *s_bg_exit_timer = NULL;
-// Off-screen keep-alive window for background (wakeup) launches. Pebble's
+// Keep-alive window for background (wakeup) launches. Pebble's
 // app_event_loop() returns the instant the window stack is empty, so a
 // headless fetch with no window pushed would exit before any async
 // AppMessage round-trip. We push this on background init and pop it once
 // the fetch finishes (or times out) so the loop stays alive in between.
+//
+// This window IS visible: a wakeup launch kills the watchface and the
+// compositor switches to our first rendered frame. Shipping it bare (no
+// handlers, default white background) painted a full white screen for the
+// whole fetch — reported by users as "watch randomly goes white/blank"
+// (PebbleOS FIRM-4058). It now renders an intentional-looking status frame
+// instead (prv_bg_draw), and is only pushed at all when the phone is
+// reachable (see the pre-check in comm_background_init).
 static Window *s_bg_window = NULL;
 
 // Persistent storage key for wakeup ID
 #define PERSIST_KEY_WAKEUP_ID 300
+// Consecutive background-fetch failures, persisted so the exponential backoff
+// survives process death. Every background launch is a fresh process, so the
+// in-RAM s_bg_fail_count alone always restarted the ladder at 5 minutes — a
+// watch away from its phone would retry (and, before the FIRM-4058 fix,
+// white-flash) every ~5 minutes forever instead of backing off to the 4 h cap.
+#define PERSIST_KEY_BG_FAIL_COUNT 301
 
 // Forward declarations
 static void prv_reschedule_wakeup(bool success);
@@ -334,11 +348,11 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
       if (new_interval == 0) {
         // Disabled - cancel all wakeups
         wakeup_cancel_all();
-        APP_LOG(APP_LOG_LEVEL_INFO, "BG: Disabled, cancelled wakeups");
+        APP_LOG(APP_LOG_LEVEL_INFO, "BG: off");
       } else {
         // Enabled or interval changed - reschedule
         prv_reschedule_wakeup(true);
-        APP_LOG(APP_LOG_LEVEL_INFO, "BG: Interval changed to %d secs", new_interval);
+        APP_LOG(APP_LOG_LEVEL_INFO, "BG: iv %ds", new_interval);
       }
     }
   }
@@ -598,7 +612,7 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
         app_timer_cancel(s_bg_timeout_timer);
         s_bg_timeout_timer = NULL;
       }
-      APP_LOG(APP_LOG_LEVEL_INFO, "BG: Data received successfully");
+      APP_LOG(APP_LOG_LEVEL_INFO, "BG: ok");
       prv_reschedule_wakeup(true);  // Success - normal interval
       s_is_background_mode = false;
 
@@ -617,7 +631,7 @@ static void prv_inbox_dropped(AppMessageResult reason, void *context) {
       app_timer_cancel(s_bg_timeout_timer);
       s_bg_timeout_timer = NULL;
     }
-    APP_LOG(APP_LOG_LEVEL_ERROR, "BG: Message dropped, rescheduling with backoff");
+    APP_LOG(APP_LOG_LEVEL_ERROR, "BG: dropped");
     prv_reschedule_wakeup(false);  // Failure - exponential backoff
     s_is_background_mode = false;
 
@@ -832,28 +846,9 @@ void comm_load_cache(void) {
   }
 }
 
-// Reschedule wakeup with exponential backoff on failure
-static void prv_reschedule_wakeup(bool success) {
-  int interval = settings_get_background_interval();
-  if (interval == 0) return;  // Disabled
-
-  int delay_secs;
-  if (success) {
-    s_bg_fail_count = 0;
-    delay_secs = interval;  // Normal interval (30 or 60 mins)
-  } else {
-    // Clamp before shifting: the backoff already saturates at s_max_backoff_mins
-    // by fail_count 7 (5 * 2^6 = 320 > 240), so an uncapped counter would only
-    // overflow the 1<<(n-1) shift into negative/UB delays after ~30 failures.
-    if (s_bg_fail_count < 7) s_bg_fail_count++;
-    // Exponential: 5, 10, 20, 40, 80, 160 mins (cap at 4 hrs)
-    int backoff_mins = 5 * (1 << (s_bg_fail_count - 1));
-    if (backoff_mins > s_max_backoff_mins) {
-      backoff_mins = s_max_backoff_mins;
-    }
-    delay_secs = backoff_mins * 60;
-  }
-
+// Schedule the next background wakeup delay_secs from now, replacing any
+// existing one. Does not touch the failure counter — callers own that.
+static void prv_schedule_wakeup_in(int delay_secs) {
   time_t next_wakeup = time(NULL) + delay_secs;
   
   // Cancel existing wakeup
@@ -875,18 +870,47 @@ static void prv_reschedule_wakeup(bool success) {
   if (wid >= 0) {
     s_wakeup_id = wid;
     persist_write_int(PERSIST_KEY_WAKEUP_ID, wid);
-    APP_LOG(APP_LOG_LEVEL_INFO, "BG: Wakeup scheduled in %d seconds (wid=%d, attempts=%d)", 
+    APP_LOG(APP_LOG_LEVEL_INFO, "BG: sched %ds wid=%d n=%d", 
             delay_secs, (int)wid, try);
   } else {
-    APP_LOG(APP_LOG_LEVEL_ERROR, "BG: Wakeup scheduling FAILED after %d attempts", try);
+    APP_LOG(APP_LOG_LEVEL_ERROR, "BG: sched failed n=%d", try);
     persist_delete(PERSIST_KEY_WAKEUP_ID);
   }
+}
+
+// Reschedule wakeup with exponential backoff on failure. The failure count is
+// persisted (see PERSIST_KEY_BG_FAIL_COUNT) so the ladder keeps climbing
+// across background launches, each of which is a fresh process.
+static void prv_reschedule_wakeup(bool success) {
+  int interval = settings_get_background_interval();
+  if (interval == 0) return;  // Disabled
+
+  int delay_secs;
+  if (success) {
+    s_bg_fail_count = 0;
+    persist_delete(PERSIST_KEY_BG_FAIL_COUNT);
+    delay_secs = interval;  // Normal interval (30 or 60 mins)
+  } else {
+    // Clamp before shifting: the backoff already saturates at s_max_backoff_mins
+    // by fail_count 7 (5 * 2^6 = 320 > 240), so an uncapped counter would only
+    // overflow the 1<<(n-1) shift into negative/UB delays after ~30 failures.
+    if (s_bg_fail_count < 7) s_bg_fail_count++;
+    persist_write_int(PERSIST_KEY_BG_FAIL_COUNT, s_bg_fail_count);
+    // Exponential: 5, 10, 20, 40, 80, 160 mins (cap at 4 hrs)
+    int backoff_mins = 5 * (1 << (s_bg_fail_count - 1));
+    if (backoff_mins > s_max_backoff_mins) {
+      backoff_mins = s_max_backoff_mins;
+    }
+    delay_secs = backoff_mins * 60;
+  }
+
+  prv_schedule_wakeup_in(delay_secs);
 }
 
 // Wakeup handler - called when wakeup fires while app is running
 static void prv_wakeup_handler(WakeupId id, int32_t reason) {
   (void)reason;
-  APP_LOG(APP_LOG_LEVEL_INFO, "BG: Wakeup fired while app running (wid=%d)", (int)id);
+  APP_LOG(APP_LOG_LEVEL_INFO, "BG: fired wid=%d", (int)id);
   
   // Clean up persisted ID
   if (persist_exists(PERSIST_KEY_WAKEUP_ID)) {
@@ -904,7 +928,7 @@ static void prv_wakeup_handler(WakeupId id, int32_t reason) {
 // Delayed exit callback - closes AppMessage and allows app to terminate
 static void prv_bg_exit(void *data) {
   (void)data;
-  APP_LOG(APP_LOG_LEVEL_INFO, "BG: Closing AppMessage and exiting");
+  APP_LOG(APP_LOG_LEVEL_INFO, "BG: exit");
   // Refresh the launcher glance with whatever this background fetch landed.
   // On timeout/drop nothing arrived (last_updated stays 0 — bg launches
   // never load the cache), so glance_update()'s guard makes it a no-op and
@@ -924,7 +948,7 @@ static void prv_bg_exit(void *data) {
 // Background timeout - no data arrived within 28 seconds
 static void prv_bg_timeout(void *data) {
   (void)data;
-  APP_LOG(APP_LOG_LEVEL_WARNING, "BG: Timeout - no data received");
+  APP_LOG(APP_LOG_LEVEL_WARNING, "BG: timeout");
   prv_reschedule_wakeup(false);  // Failure - exponential backoff
   s_bg_timeout_timer = NULL;
   s_is_background_mode = false;
@@ -933,30 +957,89 @@ static void prv_bg_timeout(void *data) {
   s_bg_exit_timer = app_timer_register(100, prv_bg_exit, NULL);
 }
 
-// Background mode initialization - minimal init, no UI
+// The status frame shown while a background fetch is in flight. Anything we
+// push gets rendered (the compositor waits for our first frame, then shows
+// it), so the choice is not "UI vs no UI" — it is "which frame". A labeled
+// dark frame reads as deliberate; the old bare white one read as a broken
+// watch.
+// Drawn straight into the root layer rather than via a TextLayer: identical
+// pixels, but no heap allocation, no unload path, and ~170 bytes less code.
+// On an app with ~400 bytes of headroom that margin is the whole budget.
+// "TouchyWeather" is one unbreakable word — verified to fit on a single line
+// of Gothic 24 Bold at 144 px (basalt/diorite/flint), so the string is always
+// two lines and BG_MSG_H reserves exactly that.
+#define BG_MSG_H 56  // two lines of Gothic 24 (~28 px each)
+static void prv_bg_draw(Layer *layer, GContext *ctx) {
+  const GRect b = layer_get_bounds(layer);
+  graphics_context_set_fill_color(ctx, GColorBlack);
+  graphics_fill_rect(ctx, b, 0, GCornerNone);
+  graphics_context_set_text_color(ctx, GColorWhite);
+  graphics_draw_text(ctx, "TouchyWeather\nupdating...",
+                     fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+                     GRect(0, (b.size.h - BG_MSG_H) / 2, b.size.w, BG_MSG_H),
+                     GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
+}
+
+// Background mode initialization - minimal init, status frame only
 void comm_background_init(void) {
   int interval = settings_get_background_interval();
   if (interval == 0) {
-    APP_LOG(APP_LOG_LEVEL_INFO, "BG: Disabled, skipping");
+    APP_LOG(APP_LOG_LEVEL_INFO, "BG: off");
     return;
   }
 
   // Clean up the persisted wakeup ID that triggered this launch
   if (persist_exists(PERSIST_KEY_WAKEUP_ID)) {
     WakeupId triggered_id = persist_read_int(PERSIST_KEY_WAKEUP_ID);
-    APP_LOG(APP_LOG_LEVEL_INFO, "BG: Cleaning up triggered wakeup (wid=%d)", (int)triggered_id);
+    APP_LOG(APP_LOG_LEVEL_INFO, "BG: clear wid=%d", (int)triggered_id);
     persist_delete(PERSIST_KEY_WAKEUP_ID);
   }
   s_wakeup_id = -1;
 
-  APP_LOG(APP_LOG_LEVEL_INFO, "BG: Starting background fetch");
+  // Resume the failure streak from previous background launches so the
+  // exponential backoff actually climbs (each launch is a fresh process).
+  if (persist_exists(PERSIST_KEY_BG_FAIL_COUNT)) {
+    s_bg_fail_count = persist_read_int(PERSIST_KEY_BG_FAIL_COUNT);
+  }
+
+  // No phone app reachable → the fetch cannot possibly succeed. Reschedule
+  // (backoff) and bail BEFORE pushing any window: with an empty window stack
+  // app_event_loop() returns immediately, we never render a frame, and the
+  // compositor never leaves the watchface's last frame — the launch is
+  // invisible. This was the worst variant of FIRM-4058: a wakeup during a BT
+  // disconnect left the old blank window up until the user pressed back.
+  if (!connection_service_peek_pebble_app_connection()) {
+    APP_LOG(APP_LOG_LEVEL_WARNING, "BG: no phone");
+    prv_reschedule_wakeup(false);
+    return;
+  }
+
+  APP_LOG(APP_LOG_LEVEL_INFO, "BG: fetch");
   s_is_background_mode = true;
+
+  // Guarantee the wakeup chain survives an early death (user backs out of
+  // the status frame, or the OS kills us at ~30 s): schedule the next run
+  // now, without touching the failure streak. The normal completion paths
+  // (success / drop / timeout) cancel and reschedule with the delay they
+  // actually want, so this is only the fallback. Without it, one back press
+  // mid-fetch silently ended background updates until the next manual app
+  // open.
+  prv_schedule_wakeup_in(interval);
 
   // Keep the event loop alive: without a window on the stack,
   // app_event_loop() returns immediately and the OS tears us down before
-  // any data arrives. This window is never drawn to (no handlers); it
-  // exists purely to hold the loop open until prv_bg_exit pops it.
+  // any data arrives. It also gives us our on-screen frame (see
+  // prv_bg_window_load); prv_bg_exit pops it. If window_create() fails
+  // (heap exhausted) fall through: the event loop exits immediately and
+  // the fallback wakeup above retries later.
   s_bg_window = window_create();
+  if (!s_bg_window) {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "BG: win fail");
+    s_is_background_mode = false;
+    return;
+  }
+  window_set_background_color(s_bg_window, GColorBlack);
+  layer_set_update_proc(window_get_root_layer(s_bg_window), prv_bg_draw);
   window_stack_push(s_bg_window, false);
 
   // Open AppMessage (triggers PKJS ready event)
@@ -1002,10 +1085,10 @@ void comm_init(void) {
         wakeup_valid = true;
         time_t now = time(NULL);
         int secs_until = (int)(wakeup_time - now);
-        APP_LOG(APP_LOG_LEVEL_INFO, "BG: Existing wakeup found (wid=%d, in %d secs)", 
+        APP_LOG(APP_LOG_LEVEL_INFO, "BG: wid=%d in %ds", 
                 (int)s_wakeup_id, secs_until);
       } else {
-        APP_LOG(APP_LOG_LEVEL_INFO, "BG: Persisted wakeup invalid, cleaning up");
+        APP_LOG(APP_LOG_LEVEL_INFO, "BG: wid stale");
         persist_delete(PERSIST_KEY_WAKEUP_ID);
         s_wakeup_id = -1;
       }
@@ -1014,7 +1097,7 @@ void comm_init(void) {
     // Schedule new wakeup if none exists
     if (!wakeup_valid) {
       prv_reschedule_wakeup(true);
-      APP_LOG(APP_LOG_LEVEL_INFO, "BG: Scheduling initial wakeup (%d secs)", bg_interval);
+      APP_LOG(APP_LOG_LEVEL_INFO, "BG: init %ds", bg_interval);
     }
   }
 
