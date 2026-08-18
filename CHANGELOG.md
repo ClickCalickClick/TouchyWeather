@@ -5,6 +5,7 @@ build reads it to generate the in-app "What's New" screen, so keep the most
 recent version at the top with `## x.y.z` and one bullet (`- `) per line.
 
 ## 2.1.0
+- Background refresh no longer blanks the screen white — thanks to Eric Migicovsky for finding and fixing it.
 - Wind speed can now be shown in m/s, separately from °C and °F — choose it in Settings.
 - Big Mode: the 6 Hours card now reaches all six hours — press SELECT to page between them.
 - Big Mode: temperature units are now labelled, and the detail views use large type too.
