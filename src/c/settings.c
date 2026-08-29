@@ -2,7 +2,10 @@
 #include "theme.h"
 #include "ui.h"
 
-// Persistence keys. Avoid collisions with comm.c PERSIST_KEY_CACHE=101.
+// Persistence keys. Avoid collisions with comm.c's cache block: 100-109 are
+// retired cache keys (purged at launch), 110 is the cache layout version, and
+// 111+ are the cache chunks — sized from sizeof(WeatherData) and asserted to
+// stop short of 199, so treat 100-199 as comm.c's.
 // (Key 200 retired: theme is now owned solely by theme.c under persist key 1;
 //  theme_init() migrates any legacy key-200 value. See theme.c.)
 #define KEY_LOOP_NAV           201  // bool: wrap card carousel at edges

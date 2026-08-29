@@ -12,6 +12,12 @@ void comm_background_init(void);
 // Load cached weather data before first draw (prevents units flash).
 void comm_load_cache(void);
 
+// Seconds since a unix timestamp, clamped at 0 when it is in the future.
+// Use this for EVERY elapsed-time test against WeatherData.last_updated: that
+// field carries the phone's clock while time(NULL) is the watch's, and plain
+// unsigned subtraction turns a one-second lead into 4.29 billion. See comm.c.
+uint32_t comm_secs_since(uint32_t then);
+
 // Ask PKJS to refresh now (e.g. on theme/units change or manual refresh).
 void comm_request_refresh(void);
 
