@@ -82,7 +82,11 @@ void anim_init(void) {
   s_frame = 0;
   // Animate through the first post-launch window, then settle.
   s_deadline_frame = ANIM_TIMEOUT_FRAMES;
-  s_timer = app_timer_register(ANIM_PERIOD_MS, prv_tick, NULL);
+  // prv_ensure_running(), not a bare register: the cold-start refresh sheet
+  // opens during prv_window_load, which is BEFORE this runs, and its
+  // anim_kick() has already started the ticker. Registering a second timer
+  // here would leave two 10Hz chains redrawing the same layers forever.
+  prv_ensure_running();
 }
 
 void anim_deinit(void) {

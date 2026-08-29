@@ -58,6 +58,14 @@
 #define LOADING_TIMEOUT_MS        6000
 #define LOADING_FALLBACK_HOLD_MS  1500
 
+// Cold start gets a longer leash than a manual refresh. 6s is generous for a
+// refresh on a phone that is already awake and connected; the first fetch of a
+// launch is a BLE wake plus three API calls, which routinely runs past it. At
+// 6s the sheet would slide away with "Couldn't reach the forecast just now..."
+// moments before the data actually landed, which reads as a failure the app
+// then contradicts. Timing out here is silent for the same reason.
+#define COLD_START_TIMEOUT_MS     10000
+
 // Minimum time the sheet stays open before closing, even on instant data.
 #define LOADING_MIN_DISPLAY_MS    900
 
@@ -114,6 +122,9 @@ static AppTimer *s_close_holdoff_timer = NULL;
 static int       s_phrase_idx = 0;
 static bool      s_show_fallback = false;
 static bool      s_up_to_date = false;
+// This sheet opened itself at launch rather than being asked for. Changes the
+// timeout length, silences the failure phrase, and makes the sheet dismissable.
+static bool      s_cold_start = false;
 static uint64_t  s_loading_start_ms = 0;
 static bool      s_data_received_pending = false;
 
@@ -129,8 +140,7 @@ static uint64_t prv_now_ms(void) {
 static bool prv_data_is_fresh(void) {
   WeatherData *d = weather_data_get();
   if (!d->valid || d->last_updated == 0) return false;  // mock/no data
-  uint32_t now = (uint32_t)time(NULL);
-  return (now - d->last_updated) < REFRESH_COOLDOWN_SECS;
+  return comm_secs_since(d->last_updated) < REFRESH_COOLDOWN_SECS;
 }
 
 static void prv_cancel_timer(AppTimer **t) {
@@ -191,6 +201,7 @@ static void prv_slide_tick(void *ctx) {
     } else if (s_state == REFRESH_CLOSING) {
       s_state = REFRESH_IDLE;
       s_up_to_date = false;
+      s_cold_start = false;
       prv_cancel_timer(&s_phrase_timer);
       prv_cancel_timer(&s_timeout_timer);
       prv_cancel_timer(&s_close_holdoff_timer);
@@ -225,6 +236,12 @@ static void prv_timeout_tick(void *ctx) {
   (void)ctx;
   s_timeout_timer = NULL;
   if (s_state != REFRESH_LOADING) return;
+  if (s_cold_start) {
+    // Nobody asked for this sheet, so it does not get to report a failure.
+    // Slide away and leave the card's own NO DATA YET panel to speak.
+    prv_start_close();
+    return;
+  }
   s_show_fallback = true;
   prv_cancel_timer(&s_phrase_timer);
   prv_mark_dirty();
@@ -256,7 +273,9 @@ static void prv_enter_loading(void) {
     return;
   }
   s_phrase_timer = app_timer_register(PHRASE_ROTATE_MS, prv_phrase_tick, NULL);
-  s_timeout_timer = app_timer_register(LOADING_TIMEOUT_MS, prv_timeout_tick, NULL);
+  s_timeout_timer = app_timer_register(
+      s_cold_start ? COLD_START_TIMEOUT_MS : LOADING_TIMEOUT_MS,
+      prv_timeout_tick, NULL);
   prv_mark_dirty();
 
   // If data already landed before we finished opening, schedule a close
@@ -443,7 +462,7 @@ bool refresh_sheet_is_active(void) {
   return s_state != REFRESH_IDLE;
 }
 
-void refresh_sheet_show_programmatic(void) {
+static void prv_show(bool cold) {
   // One overlay at a time: ignore if a sheet or detail modal is up.
   if (s_state != REFRESH_IDLE) return;
   if (detail_modal_is_active()) return;
@@ -452,14 +471,43 @@ void refresh_sheet_show_programmatic(void) {
   // button-only platforms (and button users on touch models) identical
   // spinner/phrase feedback.
   s_state = REFRESH_OPENING;
+  s_cold_start = cold;
   s_data_received_pending = false;
   s_claimed_gesture = false;
   s_pull_dy = 0;
   s_sheet_y = 0;
   anim_kick();  // ensure the 10 Hz ticker runs so the spinner rotates
-  s_up_to_date = prv_data_is_fresh();
-  if (!s_up_to_date) comm_request_refresh();
+  // A cold start has no reading at all, so the freshness cooldown cannot
+  // apply, and comm_init()'s launch request is already in flight — this sheet
+  // watches that fetch rather than starting a second one.
+  s_up_to_date = cold ? false : prv_data_is_fresh();
+  if (!cold && !s_up_to_date) comm_request_refresh();
+  if (cold) {
+    // No slide-down. The point of the cold-start sheet is to REPLACE the
+    // NO DATA YET panel, and a 250ms open animation shows that panel through
+    // the gap under the sheet's leading edge for the whole slide. Opened from
+    // prv_window_load this puts the sheet fully open in the window's FIRST
+    // paint, so the panel is never on screen at all — the only motion is the
+    // slide-up when the forecast lands.
+    s_sheet_y = s_sheet_h;
+    prv_mark_dirty();
+    prv_enter_loading();
+    return;
+  }
   prv_start_slide(s_sheet_h);
+}
+
+void refresh_sheet_show_programmatic(void) { prv_show(false); }
+
+void refresh_sheet_show_cold_start(void) { prv_show(true); }
+
+bool refresh_sheet_consume_input(void) {
+  if (s_state == REFRESH_IDLE) return false;
+  // A sheet the user never asked for must never be a wall: the first press or
+  // tap sends it away. It is still consumed — the press dismisses, it does not
+  // also page a card — which is the same bargain any dismissable overlay makes.
+  if (s_cold_start && s_state != REFRESH_CLOSING) prv_start_close();
+  return true;
 }
 
 bool refresh_sheet_on_touchdown(int16_t x, int16_t y) {
@@ -519,8 +567,9 @@ bool refresh_sheet_on_liftoff(int16_t x, int16_t y) {
   if (s_state == REFRESH_LOADING ||
       s_state == REFRESH_OPENING ||
       s_state == REFRESH_CLOSING) {
-    // Already in a non-tracking active phase: swallow.
-    return true;
+    // Already in a non-tracking active phase: swallow — and dismiss it if
+    // this is the cold-start sheet, so tap-to-dismiss matches the buttons.
+    return refresh_sheet_consume_input();
   }
   if (!s_claimed_gesture || s_state != REFRESH_TRACKING) {
     // Never claimed — let caller do its swipe/tap thing.

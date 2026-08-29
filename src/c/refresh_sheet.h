@@ -38,3 +38,23 @@ bool refresh_sheet_is_active(void);
 // so non-touch platforms have a manual-refresh path. No-op if a sheet is
 // already active.
 void refresh_sheet_show_programmatic(void);
+
+// Open the sheet automatically on a COLD START — a launch that found no
+// cached reading, where the alternative is a static NO DATA YET panel for
+// however long the first payload takes. Runs the same OPENING -> LOADING ->
+// close cycle, with three differences:
+//   * it fires no fetch of its own (comm_init()'s 750ms launch request
+//     already owns the first fetch; a second would double the PKJS work),
+//   * a timeout slides the sheet away silently instead of accusing the phone
+//     of failing, because a cold BLE wake plus three API calls legitimately
+//     outruns the manual-refresh timeout, and
+//   * any button or tap dismisses it, so a slow phone can never hold the
+//     user's input hostage.
+void refresh_sheet_show_cold_start(void);
+
+// Input gate for the button/tap handlers: true when the sheet owns the
+// input and the caller must not act on it. Replaces a bare
+// refresh_sheet_is_active() check at those sites because a cold-start sheet
+// is dismissable — asking whether the sheet consumes the press is also what
+// tells the sheet to get out of the way.
+bool refresh_sheet_consume_input(void);

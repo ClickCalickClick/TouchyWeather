@@ -211,7 +211,7 @@ static void prv_select_click(ClickRecognizerRef r, void *ctx) {
   anim_kick();  // user activity: resume/extend decorative animation
   // While a detail modal is open, SELECT toggles its secondary overlay.
   if (detail_modal_is_active()) { detail_modal_handle_select(); return; }
-  if (refresh_sheet_is_active()) return;
+  if (refresh_sheet_consume_input()) return;
   // Context-aware short-press:
   //   Radar    → retry fetch (bypasses 60s cooldown)
   //   Settings → toggle the highlighted row
@@ -272,7 +272,7 @@ static void prv_select_long(ClickRecognizerRef r, void *ctx) {
   (void)r; (void)ctx;
   anim_kick();
   if (detail_modal_is_active()) return;  // no re-trigger while modal is open
-  if (refresh_sheet_is_active()) return;
+  if (refresh_sheet_consume_input()) return;
   if (strcmp(nav_current_name(), "Settings") == 0) return;
   // Phase 4: on forecast cards that have a detail view, SELECT-long opens the
   // bottom-sheet detail modal (claims the gesture unconditionally there).
@@ -292,7 +292,7 @@ static void prv_up_click(ClickRecognizerRef r, void *ctx) {
   (void)r; (void)ctx;
   anim_kick();
   if (detail_modal_is_active()) { detail_modal_handle_up(); return; }
-  if (refresh_sheet_is_active()) return;
+  if (refresh_sheet_consume_input()) return;
   nav_prev();
 }
 
@@ -300,7 +300,7 @@ static void prv_down_click(ClickRecognizerRef r, void *ctx) {
   (void)r; (void)ctx;
   anim_kick();
   if (detail_modal_is_active()) { detail_modal_handle_down(); return; }
-  if (refresh_sheet_is_active()) return;
+  if (refresh_sheet_consume_input()) return;
   nav_next();
 }
 
@@ -310,7 +310,7 @@ static void prv_down_click(ClickRecognizerRef r, void *ctx) {
 static void prv_up_long(ClickRecognizerRef r, void *ctx) {
   (void)r; (void)ctx;
   if (detail_modal_is_active()) return;
-  if (refresh_sheet_is_active()) return;
+  if (refresh_sheet_consume_input()) return;
 #if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
   // D1: on-watch reorder compiled out — Clay owns card order on these classes.
 #else
@@ -326,7 +326,7 @@ static void prv_up_long(ClickRecognizerRef r, void *ctx) {
 static void prv_down_long(ClickRecognizerRef r, void *ctx) {
   (void)r; (void)ctx;
   if (detail_modal_is_active()) return;
-  if (refresh_sheet_is_active()) return;
+  if (refresh_sheet_consume_input()) return;
 #if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
   // D1: on-watch reorder compiled out — Clay owns card order on these classes.
 #else
@@ -391,6 +391,17 @@ static void prv_window_load(Window *window) {
     touch_service_subscribe(touch_handler, NULL);
   }
 #endif
+
+  // Cold start: a launch with no cached reading would otherwise open on the
+  // static NO DATA YET panel until the first payload lands. Opening the
+  // refresh sheet HERE — inside window load, before the window's first paint —
+  // means the sheet replaces that panel rather than appearing after it, and
+  // the panel is only ever revealed by the slide-up when data arrives (or by
+  // the user dismissing the sheet with any button or tap). A launch with a
+  // warm cache draws real weather immediately and has nothing to wait for.
+  if (!weather_data_has_reading()) {
+    refresh_sheet_show_cold_start();
+  }
 }
 
 static void prv_window_unload(Window *window) {
