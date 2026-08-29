@@ -84,7 +84,7 @@ static void prv_bg_exit(void *data);
 // reported as "the weekly forecast card occasionally switches to Fahrenheit".
 // The bump was the trigger, not the fix.
 //
-// It also leaks the quota. sizeof(WeatherData) is ~480 bytes and an app gets
+// It also leaks the quota. sizeof(WeatherData) is 444 bytes and an app gets
 // 4 KB of persistent storage; a user carried from 104 to 109 is holding ~2.4 KB
 // of dead blobs against that budget. prv_purge_orphaned_caches() reclaims them.
 //
@@ -98,26 +98,63 @@ static void prv_bg_exit(void *data);
 //     Bump CACHE_LAYOUT_VERSION for those, NOT the key. A rejected blob costs
 //     one refresh and shows an honest "waiting" state meanwhile; a bumped key
 //     costs the same refresh AND leaves the dead bytes behind forever.
-#define PERSIST_KEY_CACHE 109
+// The cache is SPLIT across CACHE_CHUNKS keys, because a single one cannot hold
+// it: persist_write_data caps each value at PERSIST_DATA_MAX_LENGTH (256) and
+// sizeof(WeatherData) is 444. The single-key version at 109 did not fail — it
+// wrote the first 256 bytes and RETURNED 256, and that return was discarded.
+// Every launch then measured 256 against 444, took the "rejected" branch below
+// and set valid=false, so the app has in fact NEVER had a working cache: it
+// started from the empty state every open and refetched every open because
+// last_updated was always 0. All the machinery below (layout version, orphan
+// purge, the six historical key bumps) was built on the assumption that a blob
+// existed to protect. Anything writing a struct to persist must check the
+// return. Ported from the watchface, which had the identical defect.
+#define PERSIST_KEY_CACHE_RETIRED 109  // dead 256-byte stub; purged below
+#define PERSIST_KEY_CACHE_BASE    111  // 111..(111 + CACHE_CHUNKS - 1)
+#define CACHE_CHUNK_MAX           PERSIST_DATA_MAX_LENGTH
+#define CACHE_CHUNKS \
+  ((sizeof(WeatherData) + CACHE_CHUNK_MAX - 1) / CACHE_CHUNK_MAX)
+// 210 is KEY_TOGGLE_BASE in settings.c; stop well short of it rather than let a
+// growing struct walk the chunks into the settings range.
+_Static_assert(PERSIST_KEY_CACHE_BASE + CACHE_CHUNKS - 1 <= 199,
+               "WeatherData cache outgrew the persist keys reserved for it");
 // Reserves the value a seventh bump would have taken, so nothing can claim it.
 #define PERSIST_KEY_CACHE_LAYOUT 110
 // v1 -> v2: `wind_units` was added to WeatherData. It landed in existing
-// padding, so sizeof() is still 480 and the size guard above sees NOTHING —
+// padding, so sizeof() did not move and the size guard above sees NOTHING —
 // this constant is the only thing standing between an old blob and a wind unit
 // read out of whatever that padding byte happened to hold. Exactly the case the
 // layout version exists for.
 #define CACHE_LAYOUT_VERSION 2
 
 // Keys 100–108: retired cache blobs from before 109, never deleted by the
-// bumps that abandoned them. Deleting a key that does not exist is a no-op, so
-// this is safe to run on every launch and self-heals a user at any version.
+// bumps that abandoned them. 109 joins them now that the cache is chunked — it
+// can only ever hold the truncated stub described above, so there is nothing to
+// migrate, only quota to reclaim. Deleting a key that does not exist is a no-op,
+// so this is safe to run on every launch and self-heals a user at any version.
 #define PERSIST_KEY_CACHE_FIRST_RETIRED 100
-#define PERSIST_KEY_CACHE_LAST_RETIRED  108
+#define PERSIST_KEY_CACHE_LAST_RETIRED  109
 
 // Unconditional delete, no persist_exists() probe and no logging: deleting a
 // key that does not exist is a no-op, and this app has ~400 bytes of RAM
 // headroom (see the size note in nav.c's prv_draw_card) — a probe-and-log version
 // of this loop is several times the code for the same effect.
+// Seconds elapsed since `then`, clamped at 0 when `then` is in the future.
+//
+// Load-bearing, not defensive noise. `last_updated` is the PHONE's clock (PKJS
+// stamps Date.now() at fetch time) while `now` is the WATCH's, and the two are
+// only ever approximately equal: the payload takes a few hundred ms to arrive,
+// and Pebble's time sync leaves the watch a little either side of the phone.
+// Plain unsigned subtraction turns a one-second lead into 4.29 billion, so
+// every freshness test reads "ancient" — the open-time guard refetches on every
+// launch, the manual-refresh cooldown never engages, and auto-hide reads every
+// forecast as stale. ui.c's prv_format_ago and advice.c both already guard this
+// inline; this is the shared version for everyone who does not.
+uint32_t comm_secs_since(uint32_t then) {
+  uint32_t now = (uint32_t)time(NULL);
+  return (then > now) ? 0 : (now - then);
+}
+
 static void prv_purge_orphaned_caches(void) {
   for (uint32_t k = PERSIST_KEY_CACHE_FIRST_RETIRED;
        k <= PERSIST_KEY_CACHE_LAST_RETIRED; ++k) {
@@ -125,17 +162,42 @@ static void prv_purge_orphaned_caches(void) {
   }
 }
 
+// Size of chunk `i`; the last one is the remainder.
+static size_t prv_chunk_size(uint32_t i) {
+  size_t off = (size_t)i * CACHE_CHUNK_MAX;
+  size_t left = sizeof(WeatherData) - off;
+  return left < CACHE_CHUNK_MAX ? left : CACHE_CHUNK_MAX;
+}
+
+static void prv_cache_delete(void) {
+  for (uint32_t i = 0; i < CACHE_CHUNKS; ++i) {
+    persist_delete(PERSIST_KEY_CACHE_BASE + i);
+  }
+  persist_delete(PERSIST_KEY_CACHE_LAYOUT);
+}
+
 static void prv_save_cache(void) {
   WeatherData *d = weather_data_get();
-  if (d->valid) {
-    persist_write_data(PERSIST_KEY_CACHE, d, sizeof(WeatherData));
-    persist_write_int(PERSIST_KEY_CACHE_LAYOUT, CACHE_LAYOUT_VERSION);
+  if (!d->valid) return;
+  const uint8_t *src = (const uint8_t *)d;
+  for (uint32_t i = 0; i < CACHE_CHUNKS; ++i) {
+    size_t n = prv_chunk_size(i);
+    // The return is the point: a short write is how the old single-key cache
+    // failed silently. Half a struct is worse than none — the load would splice
+    // a fresh head onto a stale tail — so bail as a unit.
+    if (persist_write_data(PERSIST_KEY_CACHE_BASE + i, src, n) != (int)n) {
+      prv_cache_delete();
+      return;
+    }
+    src += n;
   }
+  // Written LAST, so the layout stamp can never vouch for a partial cache.
+  persist_write_int(PERSIST_KEY_CACHE_LAYOUT, CACHE_LAYOUT_VERSION);
 }
 
 static void prv_load_cache(void) {
   WeatherData *d = weather_data_get();
-  if (!persist_exists(PERSIST_KEY_CACHE)) return;
+  if (!persist_exists(PERSIST_KEY_CACHE_BASE)) return;
 
   // A blob written before the layout key existed is BY DEFINITION v1 — that is
   // what v1 names: the struct as of the pin. Absence therefore grandfathers in
@@ -152,17 +214,40 @@ static void prv_load_cache(void) {
   int layout = persist_exists(PERSIST_KEY_CACHE_LAYOUT)
                    ? persist_read_int(PERSIST_KEY_CACHE_LAYOUT)
                    : 1;
-  int stored = persist_get_size(PERSIST_KEY_CACHE);
+
+  // Total the chunks and check EVERY one before reading ANY of them. A partial
+  // read would leave the head of WeatherData holding cached bytes and the tail
+  // holding whatever was there before — including `valid` and unterminated
+  // strings, which the cards then format. Checking first means a rejected cache
+  // leaves the struct exactly as weather_data_init_empty() set it up.
+  int stored = 0;
+  for (uint32_t i = 0; i < CACHE_CHUNKS; ++i) {
+    int got = persist_get_size(PERSIST_KEY_CACHE_BASE + i);
+    if (got != (int)prv_chunk_size(i)) { stored = -1; break; }
+    stored += got;
+  }
 
   if (stored != (int)sizeof(WeatherData) || layout != CACHE_LAYOUT_VERSION) {
     APP_LOG(APP_LOG_LEVEL_WARNING, "Cache rejected: %d/%d", stored, layout);
-    persist_delete(PERSIST_KEY_CACHE);
-    persist_delete(PERSIST_KEY_CACHE_LAYOUT);
+    prv_cache_delete();
     d->valid = false;  // stay in the honest empty state until the fetch lands
     return;
   }
 
-  persist_read_data(PERSIST_KEY_CACHE, d, sizeof(WeatherData));
+  uint8_t *dst = (uint8_t *)d;
+  for (uint32_t i = 0; i < CACHE_CHUNKS; ++i) {
+    size_t n = prv_chunk_size(i);
+    if (persist_read_data(PERSIST_KEY_CACHE_BASE + i, dst, n) != (int)n) {
+      // Sizes checked out a moment ago, so this is a storage fault rather than
+      // a layout change. The struct is already part-overwritten; the only safe
+      // state left is the honest empty one.
+      APP_LOG(APP_LOG_LEVEL_WARNING, "Cache read fault at chunk %d", (int)i);
+      prv_cache_delete();
+      weather_data_init_empty();
+      return;
+    }
+    dst += n;
+  }
 }
 
 static void prv_inbox_received(DictionaryIterator *iter, void *context) {
@@ -592,8 +677,8 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
     // DATA YET" until a manual refresh.
     //
     // Here, the payload is already parsed and prv_save_cache() has just written
-    // 480 bytes, so nine reads are noise beside flash traffic we are doing
-    // anyway, and there is no inbound message left to drop.
+    // the whole struct, so ten reads are noise beside flash traffic we are
+    // doing anyway, and there is no inbound message left to drop.
     static bool s_purged_this_session = false;
     if (!s_purged_this_session) {
       s_purged_this_session = true;
@@ -781,9 +866,8 @@ static void prv_evaluate_auto_hide(void) {
     s_dry_updates = 0;
   } else {
     WeatherData *d = weather_data_get();
-    uint32_t now = (uint32_t)time(NULL);
     bool stale = (d->last_updated == 0) ||
-                 (now - d->last_updated > AUTO_HIDE_STALE_SECS);
+                 (comm_secs_since(d->last_updated) > AUTO_HIDE_STALE_SECS);
     if (!d->valid || stale) {
       want_hidden = false;    // fail open: never hide on missing/old data
       s_dry_updates = 0;
@@ -818,8 +902,7 @@ static void prv_initial_refresh(void *ctx) {
   }
   
   // Check age of cached data
-  uint32_t now = (uint32_t)time(NULL);
-  uint32_t age_secs = now - d->last_updated;
+  uint32_t age_secs = comm_secs_since(d->last_updated);
   uint32_t threshold_secs = 15 * 60;  // 15 minutes
   
   if (age_secs < threshold_secs) {
