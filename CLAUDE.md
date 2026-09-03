@@ -188,17 +188,28 @@ one feature, so they stay here permanently.
   reading `comm.c:683> Data is 187 secs old (<900 threshold), skipping fetch`, which can only come
   from a blob written by the previous run. Do not "fix" it, and do not re-derive it — the SDK
   header's 256 is documented for strings and is not what the firmware enforces here.
-* **This app has ~400 BYTES of RAM headroom. Code size is the budget.** Pebble
-  loads the whole app image into RAM, so every byte of code comes out of the app
-  heap — and `comm_init()`'s `app_message_open(2048, 256)` needs ~2.3 KB of it.
-  Adding ~430 bytes (eleven copies of a one-line guard) made `app_message_open`
-  return **4096 = `APP_MSG_OUT_OF_MEMORY`**, and the failure does not look like
-  memory: with no inbox open the phone's payload is NAKed *and* the watch's own
-  refresh request goes nowhere, so the app simply never receives weather again.
-  It reproduces 3/3 and is invisible to a build that compiles clean. Check
-  `ls -l build/basalt/pebble-app.bin` against main after any addition; the
-  `Heap Usage for App` line in `pebble logs` is the other tell (2680B broken vs
-  3248B healthy). Prefer one guard at a shared choke point over N copies.
+* **Code size is the RAM budget, and it has now bitten TWICE.** Pebble loads
+  the whole app image into RAM, so every byte of code comes out of the app
+  heap. Adding ~430 bytes (eleven copies of a one-line guard) made
+  `app_message_open` return **4096 = `APP_MSG_OUT_OF_MEMORY`** the first time;
+  PR #24's +368 bytes did it again (heap 3248B → 2880B, open needed ~2400B
+  free, had 2324B). The failure does not look like memory: with no inbox open
+  the phone's payload is NAKed *and* the watch's own refresh request goes
+  nowhere, so the app silently never receives weather again — background and
+  foreground both. Fix 2026-09-02: small screens open **(1536, 256)** via
+  `prv_msg_open()` in comm.c, which checks the return, falls back to
+  (1280, 160), and logs total failure; emery/gabbro keep (2048, 256). The
+  measured weather payload is **1240B in 111 tuples** — the floor for any
+  inbox shrink. `RADAR_CHUNK_SIZE` is a PROTOCOL constant duplicated in pkjs
+  AND radar.c (the watch reassembles at `idx * RADAR_CHUNK_SIZE`): shrinking
+  only the pkjs side stalled radar at 93% — late chunks land past the buffer
+  and are dropped uncounted, so the transfer never completes. It stays 1500;
+  only emery/gabbro (2048 inbox) ever receive chunks, so the small-screen
+  inbox puts no pressure on it. Check `ls -l build/basalt/pebble-app.bin`
+  against main after any
+  addition; the `Heap Usage for App` line in `pebble logs` is the other tell
+  (healthy is 2880B total with the 1536 open succeeding). Prefer one guard at
+  a shared choke point over N copies.
 * **Never bump `PERSIST_KEY_CACHE` (109). It is pinned.** Each of the six
   historical bumps orphaned the user's cache — the old key is never deleted, so
   `persist_exists(new)` is false, no cache loads, and whatever
@@ -218,6 +229,60 @@ one feature, so they stay here permanently.
   indefinitely instead of ending ~1s after launch. `tools/capture_nodata.py`
   walks it. Distinct from `CAPTURE_MODE`, which serves a fixed synthetic
   forecast for store shots.
+* **PKJS is NOT listening at t=0 of a wakeup launch, and the send still returns
+  `APP_MSG_OK`.** A wakeup launch is what STARTS the phone's JS app, so anything
+  `comm_background_init()` sends arrives before an `appmessage` listener exists
+  and is dropped on the phone — with no NAK, so `prv_outbox_failed`'s one retry
+  never fires. Measured on basalt 2026-09-03: `app_message_outbox_send()`
+  returned 0 while PKJS logged NEITHER of the two lines its handler can print,
+  so `comm_request_refresh()` was a no-op on every background launch. The fetch
+  then fell through to PKJS's own `ready` hook, which is freshness-gated at 15
+  min (`FETCH_FRESH_MS`) — so a wakeup finding data newer than that did nothing
+  at all and died at the 28 s timeout, which `prv_bg_timeout()` scored as a
+  FAILURE and climbed the backoff with. Fixed by `prv_bg_request()`: three sends
+  at 1 s / 6 s / 11 s, stopping the moment `s_is_background_mode` clears. The
+  foreground 750 ms defer exists for the same reason and is equally unproven on
+  hardware — foreground works because `ready` covers it, not because 750 ms is
+  enough.
+* **A closed app cannot see the phone reconnect, so out-of-range must NOT climb
+  the backoff.** `connection_service_subscribe` only delivers while the app
+  runs, so there is no reconnect hook to reset the ladder from — do not go
+  looking for one. Persisting the fail count fixed a 5-minute retry churn but
+  pinned any watch that had been out of range at the 4-hour cap, and that is
+  what "reopen hours later, last updated 5 hours ago" was. The no-phone branch
+  now HOLDS at the normal interval (`prv_schedule_wakeup_in`) and leaves the
+  count alone; the backoff still owns real failures (timeout/drop), where the
+  phone is reachable and retrying hard would cost something.
+* **Testing background updates requires an in-code interval, and 600 s is the
+  only good one.** Clay offers just 0/1800/3600 and `settings_load()` clamps to
+  0 or 300..86400, so edit `s_bg_update_interval`'s default. It must exceed
+  `FETCH_FRESH_MS` (900 s)… except that nothing under 900 s exercises the real
+  path at all: at 300 s the PKJS `ready` gate always holds, which is a test
+  artifact, not the bug. It must ALSO differ from backoff rung 1 (300 s), or the
+  `BG: sched Ns` log cannot tell a hold from a failure. 600 s fails the first
+  test deliberately and passes the second — use it to prove the sentinel path,
+  and read `appmessage: LastUpdated sentinel` in the PKJS log as the pass.
+* **A reinstall can leave the pending wakeup stale, so never reinstall while
+  waiting for one.** `comm_init()` logs `BG: wid stale` when `wakeup_query()`
+  no longer knows the persisted id, re-arms from that moment, and the wakeup you
+  were waiting on never fires — a 12-minute run comes back with an empty log and
+  looks like a broken fix. Arm the wakeup with the LAST install of the run, read
+  `BG: sched <n>s wid=` to learn when it will fire, then only press buttons.
+* **`pebble emu-bt-connection --connected no` WEDGES the emulator permanently —
+  do not use it.** It severs the pypkjs link that `pebble logs` and every
+  `emu-*` command ride on, so you lose your own observation channel the instant
+  you create the condition you wanted to observe; `--connected yes` afterwards
+  raises `libpebble2.exceptions.TimeoutError` like everything else, and only
+  `pkill -9 -f qemu-pebble` + `pebble wipe` recovers. Cost: two dead 12-minute
+  runs. To exercise `comm_background_init()`'s no-phone branch, temporarily
+  invert the peek (`if (1) {  // TEMP TEST`) and run with the phone CONNECTED —
+  the branch is what you are testing, not the radio, and logging survives.
+* **Start the emulator with `pebble install`, and attach `pebble logs` SECOND.**
+  `pebble logs` boots its OWN emulator when none is running; two `qemu-pebble`
+  processes then share one `qemu_spi_flash.bin` on different ports and both
+  wedge, after which every `emu-*` call raises
+  `libpebble2.exceptions.TimeoutError`. `pebble kill` does not always clear
+  them — `pkill -9 -f qemu-pebble` does. Cost: two dead 12-minute wakeup runs.
 * Detail sheets open with a long press: `click select --duration 800`.
 * No `timeout` command on macOS. No ImageMagick; PIL is available, and contact sheets are the
   fastest way to review a set.

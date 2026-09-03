@@ -5,11 +5,7 @@ build reads it to generate the in-app "What's New" screen, so keep the most
 recent version at the top with `## x.y.z` and one bullet (`- `) per line.
 
 ## 2.3.0
-- Opening the app before your first forecast now shows the refresh animation instead of a bare no-data screen — it slides away as soon as the forecast lands.
-- Background refresh no longer blanks your watch white — thanks to Eric Migicovsky for finding and fixing it.
-- A background update now shows a labelled status frame, and is skipped entirely when your phone is out of range.
-- Background updates no longer stop until the next time you open the app.
-- Out of range, retries now back off properly instead of repeating every few minutes.
+- Background updates now actually fetch on schedule, and time out of Bluetooth range no longer leaves your weather hours stale.
 
 ## 2.1.0
 - Wind speed can now be shown in m/s, separately from °C and °F — choose it in Settings.
