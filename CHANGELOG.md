@@ -4,7 +4,7 @@ All notable changes to TouchyWeather. The top entry is the newest release; the
 build reads it to generate the in-app "What's New" screen, so keep the most
 recent version at the top with `## x.y.z` and one bullet (`- `) per line.
 
-## 2.3.0
+## 2.3.1
 - Background updates now actually fetch on schedule, and time out of Bluetooth range no longer leaves your weather hours stale.
 
 ## 2.1.0
