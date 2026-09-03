@@ -791,6 +791,14 @@ function locateAndFetch() {
 // Phase 12: Radar streaming.
 // ----------------------------------------------------------------------
 
+// PROTOCOL CONSTANT — the watch reassembles chunks at offsets of
+// idx * RADAR_CHUNK_SIZE using its OWN copy of this number (radar.c:36).
+// The two must match exactly. Only emery/gabbro ever receive chunks
+// (TW_RADAR_SUPPORTED carves radar out elsewhere) and their inbox is 2048,
+// so the small screens' 1536 inbox puts no pressure on this value.
+// Shrinking this side alone to 1400 left every chunk 100 bytes short of
+// its slot: late chunks landed past the buffer, were dropped uncounted,
+// and radar stalled at 93%.
 var RADAR_CHUNK_SIZE = 1500;
 // Shared secret for the Vercel proxy (RADAR_SECRET env var), loaded from
 // gitignored secrets.js (template: secrets.js.example) so the key never

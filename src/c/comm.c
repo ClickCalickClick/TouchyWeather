@@ -1,4 +1,5 @@
 #include "comm.h"
+#include "ui.h"
 #include "weather_data.h"
 #include "theme.h"
 #include "settings.h"
@@ -1063,6 +1064,57 @@ static void prv_bg_draw(Layer *layer, GContext *ctx) {
                      GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
 }
 
+// AppMessage buffers for the small-screen platforms, where the app image
+// leaves only ~2.9KB of heap. The original 2048-byte inbox stopped fitting
+// when the image grew 368 bytes in PR #24: app_message_open returned
+// APP_MSG_OUT_OF_MEMORY, and with no inbox every phone payload was NAKed
+// while the outbox sentinel died too — the app silently never updated
+// again, background or foreground (see the RAM trap in CLAUDE.md). 1536
+// clears the measured 1240-byte weather payload with margin. No radar
+// chunk arrives here (TW_RADAR_SUPPORTED carves radar out); only emery/
+// gabbro's 2048 must fit one, and RADAR_CHUNK_SIZE is a protocol constant
+// shared by pkjs and radar.c — shrink one without the other and radar
+// stalls at 93%. The 1280/160 rung keeps a weather-only fallback alive.
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+static void prv_msg_open(void) {
+  if (app_message_open(1536, 256) != APP_MSG_OK &&
+      app_message_open(1280, 160) != APP_MSG_OK) {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "msg open OOM");
+  }
+}
+#endif
+
+// Re-send the refresh sentinel until the payload lands or we run out of
+// tries. A wakeup launch STARTS the phone's JS app, so at t=0 there is no
+// 'appmessage' listener registered yet and the request is dropped on the
+// phone — silently, because the transport still ACKs it. Measured on basalt:
+// app_message_outbox_send() returned APP_MSG_OK and PKJS logged neither of the
+// two lines its appmessage handler can print, so comm_request_refresh() was a
+// no-op on every background launch. The fetch then depended entirely on PKJS's
+// own 'ready' hook, which is freshness-gated at 15 minutes — when that gate
+// held, the launch did nothing at all and died at the 28s timeout, which was
+// then scored as a failure and climbed the backoff ladder.
+//
+// The foreground path already defers its request 750ms for this reason
+// (prv_initial_refresh). One delay is not enough here: JS boot latency on a
+// real phone is not 750ms, and unlike the foreground there is no user to
+// press refresh. Three attempts spread across the timeout window cover it.
+// Repeats are free — PKJS's own in-flight guard absorbs a sentinel that
+// arrives while a fetch is already running.
+#define BG_REQUEST_TRIES    3
+#define BG_REQUEST_FIRST_MS 1000
+#define BG_REQUEST_GAP_MS   5000
+static uint8_t s_bg_req_tries = 0;
+
+static void prv_bg_request(void *ctx) {
+  (void)ctx;
+  if (!s_is_background_mode) return;  // payload already landed; stop asking
+  comm_request_refresh();
+  if (++s_bg_req_tries < BG_REQUEST_TRIES) {
+    app_timer_register(BG_REQUEST_GAP_MS, prv_bg_request, NULL);
+  }
+}
+
 // Background mode initialization - minimal init, status frame only
 void comm_background_init(void) {
   int interval = settings_get_background_interval();
@@ -1092,8 +1144,19 @@ void comm_background_init(void) {
   // invisible. This was the worst variant of FIRM-4058: a wakeup during a BT
   // disconnect left the old blank window up until the user pressed back.
   if (!connection_service_peek_pebble_app_connection()) {
+    // Out of range is a HOLD, not a failure, and the difference is the whole
+    // "reopen hours later, last updated 5 hours ago" report. Scoring it as a
+    // failure climbed the exponential ladder to its 4-hour cap after ~7 missed
+    // wakeups, and NOTHING brings the ladder back down when the phone returns:
+    // a closed app cannot receive a connection event, so there is no reconnect
+    // hook to add — the only resets are a successful fetch or the user opening
+    // the app. Holding at the normal interval instead caps the cost of a walk
+    // out of range at one interval. It is nearly free: the peek above is the
+    // entire launch, with no window pushed and no AppMessage opened. The
+    // backoff still exists for real failures (timeout/drop) below, where the
+    // phone IS reachable and retrying hard would cost something.
     APP_LOG(APP_LOG_LEVEL_WARNING, "BG: no phone");
-    prv_reschedule_wakeup(false);
+    prv_schedule_wakeup_in(interval);
     return;
   }
 
@@ -1129,10 +1192,14 @@ void comm_background_init(void) {
   app_message_register_inbox_received(prv_inbox_received);
   app_message_register_inbox_dropped(prv_inbox_dropped);
   app_message_register_outbox_failed(prv_outbox_failed);
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  prv_msg_open();
+#else
   app_message_open(2048, 256);
+#endif
 
-  // Request weather
-  comm_request_refresh();
+  // Request weather (deferred — see prv_bg_request)
+  app_timer_register(BG_REQUEST_FIRST_MS, prv_bg_request, NULL);
 
   // Set 28-second timeout (OS kills us at ~30 seconds).
   // Increased from 25s to allow more time for geolocation + API fetch.
@@ -1144,9 +1211,14 @@ void comm_init(void) {
   app_message_register_inbox_received(prv_inbox_received);
   app_message_register_inbox_dropped(prv_inbox_dropped);
   app_message_register_outbox_failed(prv_outbox_failed);
-  // Inbox bumped 1024 -> 2048 in Phase 12 to fit a 1500-byte radar
-  // pixel chunk plus message tuple overhead.
+  // Large screens: inbox bumped 1024 -> 2048 in Phase 12 to fit a radar
+  // pixel chunk plus message tuple overhead. Small screens can no longer
+  // afford 2048 — see prv_msg_open.
+#if defined(UI_SCREEN_SMALL_RECT) || defined(UI_SCREEN_SMALL_ROUND)
+  prv_msg_open();
+#else
   app_message_open(2048, 256);
+#endif
   // Refresh-on-open: PKJS 'ready' usually fires soon after launch, but in
   // background-relaunch / cached-PKJS scenarios it doesn't. Send our own
   // request after a short delay so AppMessage is fully open first.
